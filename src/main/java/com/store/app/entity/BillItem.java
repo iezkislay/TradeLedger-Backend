@@ -24,23 +24,40 @@ public class BillItem {
     @ManyToOne(optional = false)
     private Item item;
 
+    /**
+     * Total quantity sold (financial commitment)
+     * quantity = fulfilledQty + pendingQty
+     */
     @Column(nullable = false)
     private BigDecimal quantity;
 
+    /**
+     * Price per unit at time of billing
+     */
     @Column(nullable = false)
     private BigDecimal price;
 
+    /**
+     * Total amount = quantity × price
+     */
     @Column(nullable = false)
     private BigDecimal amount;
 
-    // 🆕 Phase-2B: Fulfilment tracking
+    /**
+     * Quantity physically delivered to customer
+     */
     @Column(nullable = false)
     private BigDecimal fulfilledQty = BigDecimal.ZERO;
 
+    /**
+     * Quantity not yet delivered (short-sell / pending)
+     */
     @Column(nullable = false)
     private BigDecimal pendingQty = BigDecimal.ZERO;
 
+    /**
+     * FULL | PARTIAL | PENDING
+     */
     @Column(nullable = false)
     private String fulfilmentStatus;
-    // FULL | PARTIAL | PENDING
 }

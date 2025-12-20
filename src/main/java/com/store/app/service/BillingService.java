@@ -7,6 +7,7 @@ import com.store.app.enums.PaymentType;
 import com.store.app.enums.ReferenceType;
 import com.store.app.enums.StockTxnType;
 import com.store.app.repository.*;
+import com.store.app.util.WhatsAppTemplates;
 import jakarta.transaction.Transactional;
 import org.springframework.stereotype.Service;
 
@@ -28,6 +29,7 @@ public class BillingService {
     private final ValidationService validationService;
     private final AuthService authService;
     private final AuditService auditService;
+    private final NotificationService notificationService; // 🆕
 
     public BillingService(
             BillRepository billRepo,
@@ -39,7 +41,8 @@ public class BillingService {
             CustomerLedgerRepository ledgerRepo,
             ValidationService validationService,
             AuthService authService,
-            AuditService auditService
+            AuditService auditService,
+            NotificationService notificationService // 🆕
     ) {
         this.billRepo = billRepo;
         this.itemRepo = itemRepo;
@@ -51,15 +54,14 @@ public class BillingService {
         this.validationService = validationService;
         this.authService = authService;
         this.auditService = auditService;
+        this.notificationService = notificationService;
     }
 
     @Transactional
     public Bill createBill(CreateBillRequest request, User user) {
 
-        // 🔒 OWNER + BILLING
         authService.requireBillingOrOwner(user);
 
-        // 1️⃣ Create bill
         Bill bill = new Bill();
         bill.setBillNumber(generateBillNumber());
         bill.setBillCode(generateBillCode());
@@ -77,13 +79,11 @@ public class BillingService {
 
         BigDecimal total = BigDecimal.ZERO;
 
-        // 2️⃣ Process bill items (SHORT-SELL ENABLED)
         for (BillItemRequest itemReq : request.getItems()) {
 
             Item item = itemRepo.findById(itemReq.getItemId())
                     .orElseThrow(() -> new RuntimeException("Item not found"));
 
-            // 🔐 Validations
             validationService.validateQuantity(
                     item.getBaseUnit(),
                     itemReq.getQuantity()
@@ -100,18 +100,12 @@ public class BillingService {
             BigDecimal available = stock.getQuantity();
             BigDecimal requested = itemReq.getQuantity();
 
-            BigDecimal fulfilled;
-            BigDecimal pending;
+            BigDecimal fulfilled = available.compareTo(requested) >= 0
+                    ? requested
+                    : available;
 
-            if (available.compareTo(requested) >= 0) {
-                fulfilled = requested;
-                pending = BigDecimal.ZERO;
-            } else {
-                fulfilled = available;
-                pending = requested.subtract(available);
-            }
+            BigDecimal pending = requested.subtract(fulfilled);
 
-            // 🧾 Bill Item
             BillItem bi = new BillItem();
             bi.setBill(bill);
             bi.setItem(item);
@@ -121,9 +115,9 @@ public class BillingService {
             bi.setFulfilledQty(fulfilled);
             bi.setPendingQty(pending);
 
-            if (pending.compareTo(BigDecimal.ZERO) == 0) {
+            if (pending.signum() == 0) {
                 bi.setFulfilmentStatus("FULL");
-            } else if (fulfilled.compareTo(BigDecimal.ZERO) == 0) {
+            } else if (fulfilled.signum() == 0) {
                 bi.setFulfilmentStatus("PENDING");
             } else {
                 bi.setFulfilmentStatus("PARTIAL");
@@ -131,9 +125,7 @@ public class BillingService {
 
             billItemRepo.save(bi);
 
-            // 📉 Reduce stock ONLY for fulfilled quantity
-            if (fulfilled.compareTo(BigDecimal.ZERO) > 0) {
-
+            if (fulfilled.signum() > 0) {
                 stock.setQuantity(stock.getQuantity().subtract(fulfilled));
                 stockRepo.save(stock);
 
@@ -147,23 +139,15 @@ public class BillingService {
                 stockTxnRepo.save(txn);
             }
 
-            // 💰 FULL amount charged (even if pending)
             total = total.add(itemReq.getPrice().multiply(requested));
         }
 
-        // 3️⃣ Update bill total
         bill.setTotalAmount(total);
         bill = billRepo.save(bill);
 
-        // 4️⃣ CREDIT handling + audit
         if (bill.getPaymentType() == PaymentType.CREDIT) {
 
-            if (bill.getCustomer() == null) {
-                throw new RuntimeException("Customer required for CREDIT bill");
-            }
-
             Customer customer = bill.getCustomer();
-
             BigDecimal oldBalance = customer.getBalance();
             BigDecimal newBalance = oldBalance.add(bill.getTotalAmount());
 
@@ -187,16 +171,32 @@ public class BillingService {
             ledgerRepo.save(ledger);
         }
 
+        // 📲 WhatsApp Notifications
+        if (bill.getCustomer() != null) {
+
+            notificationService.sendWhatsApp(
+                    bill.getCustomer().getMobile(),
+                    WhatsAppTemplates.billCreated(bill)
+            );
+
+            if (bill.getItems().stream()
+                    .anyMatch(i -> i.getPendingQty().signum() > 0)) {
+
+                notificationService.sendWhatsApp(
+                        bill.getCustomer().getMobile(),
+                        WhatsAppTemplates.pendingItems(bill)
+                );
+            }
+        }
+
         return bill;
     }
 
-    // 🔢 Global bill number
     private String generateBillNumber() {
         long next = billRepo.count() + 1;
         return "BILL-" + String.format("%04d", next);
     }
 
-    // 📆 Daily bill code
     private String generateBillCode() {
 
         LocalDate today = LocalDate.now();

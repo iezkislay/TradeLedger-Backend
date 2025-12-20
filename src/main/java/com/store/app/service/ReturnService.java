@@ -1,13 +1,12 @@
 package com.store.app.service;
 
+import com.store.app.dto.PartialReturnRequest;
 import com.store.app.entity.*;
 import com.store.app.enums.PaymentType;
 import com.store.app.enums.ReferenceType;
+import com.store.app.enums.ReturnType;
 import com.store.app.enums.StockTxnType;
-import com.store.app.repository.CustomerLedgerRepository;
-import com.store.app.repository.CustomerRepository;
-import com.store.app.repository.StockRepository;
-import com.store.app.repository.StockTransactionRepository;
+import com.store.app.repository.*;
 import jakarta.transaction.Transactional;
 import org.springframework.stereotype.Service;
 
@@ -16,6 +15,7 @@ import java.math.BigDecimal;
 @Service
 public class ReturnService {
 
+    private final BillItemRepository billItemRepo;
     private final StockRepository stockRepo;
     private final StockTransactionRepository stockTxnRepo;
     private final CustomerRepository customerRepo;
@@ -24,6 +24,7 @@ public class ReturnService {
     private final AuditService auditService;
 
     public ReturnService(
+            BillItemRepository billItemRepo,
             StockRepository stockRepo,
             StockTransactionRepository stockTxnRepo,
             CustomerRepository customerRepo,
@@ -31,6 +32,7 @@ public class ReturnService {
             AuthService authService,
             AuditService auditService
     ) {
+        this.billItemRepo = billItemRepo;
         this.stockRepo = stockRepo;
         this.stockTxnRepo = stockTxnRepo;
         this.customerRepo = customerRepo;
@@ -39,50 +41,110 @@ public class ReturnService {
         this.auditService = auditService;
     }
 
+    /**
+     * 🔁 Partial Return (DELIVERED or PENDING)
+     */
     @Transactional
-    public void returnItem(BillItem billItem, BigDecimal quantity, User user) {
+    public void partialReturn(PartialReturnRequest req, User user) {
 
+        // 🔒 RBAC
         authService.requireBillingOrOwner(user);
 
-        if (quantity.compareTo(BigDecimal.ZERO) <= 0) {
+        BillItem bi = billItemRepo.findById(req.getBillItemId())
+                .orElseThrow(() -> new RuntimeException("Bill item not found"));
+
+        BigDecimal qty = req.getQuantity();
+
+        if (qty == null || qty.compareTo(BigDecimal.ZERO) <= 0) {
             throw new RuntimeException("Return quantity must be greater than zero");
         }
 
-        if (quantity.compareTo(billItem.getQuantity()) > 0) {
-            throw new RuntimeException("Return quantity exceeds sold quantity");
+        Bill bill = bi.getBill();
+
+        // =========================
+        // RETURN FROM DELIVERED
+        // =========================
+        if (req.getReturnType() == ReturnType.DELIVERED) {
+
+            if (qty.compareTo(bi.getFulfilledQty()) > 0) {
+                throw new RuntimeException("Return exceeds delivered quantity");
+            }
+
+            // 📦 Stock IN
+            Stock stock = stockRepo.findById(bi.getItem().getId())
+                    .orElseThrow(() -> new RuntimeException("Stock not found"));
+
+            stock.setQuantity(stock.getQuantity().add(qty));
+            stockRepo.save(stock);
+
+            // 📊 Stock transaction
+            StockTransaction txn = new StockTransaction();
+            txn.setItem(bi.getItem());
+            txn.setTransactionType(StockTxnType.IN);
+            txn.setQuantity(qty);
+            txn.setReferenceType(ReferenceType.RETURN);
+            txn.setReferenceId(bill.getId());
+            stockTxnRepo.save(txn);
+
+            // Update delivered qty
+            bi.setFulfilledQty(bi.getFulfilledQty().subtract(qty));
         }
 
-        Stock stock = stockRepo.findById(billItem.getItem().getId())
-                .orElseThrow(() -> new RuntimeException("Stock not found"));
+        // =========================
+        // CANCEL FROM PENDING
+        // =========================
+        else if (req.getReturnType() == ReturnType.PENDING) {
 
-        stock.setQuantity(stock.getQuantity().add(quantity));
-        stockRepo.save(stock);
+            if (qty.compareTo(bi.getPendingQty()) > 0) {
+                throw new RuntimeException("Return exceeds pending quantity");
+            }
 
-        StockTransaction txn = new StockTransaction();
-        txn.setItem(billItem.getItem());
-        txn.setTransactionType(StockTxnType.IN);
-        txn.setQuantity(quantity);
-        txn.setReferenceType(ReferenceType.BILL);
-        txn.setReferenceId(billItem.getBill().getId());
+            // No stock movement
+            bi.setPendingQty(bi.getPendingQty().subtract(qty));
+        }
 
-        stockTxnRepo.save(txn);
+        else {
+            throw new RuntimeException("Invalid return type");
+        }
 
-        Bill bill = billItem.getBill();
+        // =========================
+        // COMMON UPDATES
+        // =========================
+        bi.setQuantity(bi.getQuantity().subtract(qty));
 
+        // Update fulfilment status
+        if (bi.getPendingQty().compareTo(BigDecimal.ZERO) == 0 &&
+                bi.getFulfilledQty().compareTo(BigDecimal.ZERO) > 0) {
+            bi.setFulfilmentStatus("FULL");
+        } else if (bi.getFulfilledQty().compareTo(BigDecimal.ZERO) == 0) {
+            bi.setFulfilmentStatus("PENDING");
+        } else {
+            bi.setFulfilmentStatus("PARTIAL");
+        }
+
+        billItemRepo.save(bi);
+
+        // =========================
+        // AUDIT LOG
+        // =========================
         auditService.log(
                 "BILL",
                 bill.getId(),
-                "RETURN",
+                "PARTIAL_RETURN",
                 null,
-                "Returned qty: " + quantity,
+                "Type=" + req.getReturnType() + ", Qty=" + qty +
+                        ", Reason=" + req.getReason(),
                 user
         );
 
-        if (bill.getPaymentType() == PaymentType.CREDIT) {
+        // =========================
+        // LEDGER (CREDIT ONLY)
+        // =========================
+        if (bill.getPaymentType() == PaymentType.CREDIT &&
+                bill.getCustomer() != null) {
 
             Customer customer = bill.getCustomer();
-            BigDecimal refundAmount =
-                    billItem.getPrice().multiply(quantity);
+            BigDecimal refundAmount = bi.getPrice().multiply(qty);
 
             customer.setBalance(
                     customer.getBalance().subtract(refundAmount)
