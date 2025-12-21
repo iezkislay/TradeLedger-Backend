@@ -2,6 +2,7 @@ package com.store.app.service;
 
 import com.store.app.entity.Customer;
 import com.store.app.entity.CustomerLedger;
+import com.store.app.entity.User;
 import com.store.app.repository.CustomerLedgerRepository;
 import com.store.app.repository.CustomerRepository;
 import org.springframework.stereotype.Service;
@@ -15,17 +16,23 @@ public class CustomerService {
 
     private final CustomerRepository customerRepo;
     private final CustomerLedgerRepository ledgerRepo;
+    private final AuthService authService;
 
     public CustomerService(
             CustomerRepository customerRepo,
-            CustomerLedgerRepository ledgerRepo
+            CustomerLedgerRepository ledgerRepo,
+            AuthService authService
     ) {
         this.customerRepo = customerRepo;
         this.ledgerRepo = ledgerRepo;
+        this.authService = authService;
     }
 
-    // ✅ Create customer with auto-generated customerCode
-    public Customer createCustomer(Customer customer) {
+    // ✅ Create customer (OWNER / BILLING)
+    public Customer createCustomer(Customer customer, User user) {
+
+        // 🔒 RBAC
+        authService.requireBillingOrOwner(user);
 
         String customerCode = generateCustomerCode();
         customer.setCustomerCode(customerCode);
@@ -44,14 +51,16 @@ public class CustomerService {
                 .orElseThrow(() -> new RuntimeException("Customer not found"));
     }
 
-    // 🆕 Get customers with outstanding balance (credit customers)
+    // 🆕 Customers with outstanding balance
     public List<Customer> getOutstandingCustomers() {
-        return customerRepo.findByBalanceGreaterThanOrderByBalanceDesc(BigDecimal.ZERO);
+        return customerRepo
+                .findByBalanceGreaterThanOrderByBalanceDesc(BigDecimal.ZERO);
     }
 
-    // 🆕 Get full ledger for a customer (chronological order)
+    // 🆕 Customer ledger
     public List<CustomerLedger> getCustomerLedger(UUID customerId) {
-        return ledgerRepo.findByCustomer_IdOrderByCreatedAtAsc(customerId);
+        return ledgerRepo
+                .findByCustomer_IdOrderByCreatedAtAsc(customerId);
     }
 
     // 🔢 Customer code generator

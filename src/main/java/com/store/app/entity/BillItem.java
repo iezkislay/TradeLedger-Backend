@@ -1,5 +1,6 @@
 package com.store.app.entity;
 
+import com.fasterxml.jackson.annotation.JsonBackReference;
 import jakarta.persistence.*;
 import lombok.*;
 
@@ -19,6 +20,8 @@ public class BillItem {
     private UUID id;
 
     @ManyToOne(optional = false)
+    @JoinColumn(name = "bill_id")
+    @JsonBackReference
     private Bill bill;
 
     @ManyToOne(optional = false)

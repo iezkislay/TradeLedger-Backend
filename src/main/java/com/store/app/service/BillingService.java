@@ -29,7 +29,7 @@ public class BillingService {
     private final ValidationService validationService;
     private final AuthService authService;
     private final AuditService auditService;
-    private final NotificationService notificationService; // 🆕
+    private final NotificationService notificationService;
 
     public BillingService(
             BillRepository billRepo,
@@ -42,7 +42,7 @@ public class BillingService {
             ValidationService validationService,
             AuthService authService,
             AuditService auditService,
-            NotificationService notificationService // 🆕
+            NotificationService notificationService
     ) {
         this.billRepo = billRepo;
         this.itemRepo = itemRepo;
@@ -123,7 +123,9 @@ public class BillingService {
                 bi.setFulfilmentStatus("PARTIAL");
             }
 
-            billItemRepo.save(bi);
+            // ✅ CRITICAL: attach item to bill
+            bill.getItems().add(bi);
+            // billItemRepo.save(bi);
 
             if (fulfilled.signum() > 0) {
                 stock.setQuantity(stock.getQuantity().subtract(fulfilled));
@@ -145,6 +147,7 @@ public class BillingService {
         bill.setTotalAmount(total);
         bill = billRepo.save(bill);
 
+        // CREDIT handling
         if (bill.getPaymentType() == PaymentType.CREDIT) {
 
             Customer customer = bill.getCustomer();

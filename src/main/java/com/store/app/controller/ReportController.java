@@ -1,7 +1,10 @@
 package com.store.app.controller;
 
 import com.store.app.dto.*;
+import com.store.app.entity.User;
+import com.store.app.service.AuthService;
 import com.store.app.service.ReportService;
+import jakarta.servlet.http.HttpSession;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -15,6 +18,7 @@ import java.util.List;
 public class ReportController {
 
     private final ReportService reportService;
+    private final AuthService authService;
 
     /* =========================
        🟢 OLD REPORTS (ROW-LEVEL)
@@ -23,8 +27,16 @@ public class ReportController {
     // 📄 Daily detailed sales (single day, row-based)
     @GetMapping("/daily-sales")
     public ResponseEntity<ApiResponse<List<DailySalesReportRow>>> dailySales(
-            @RequestParam LocalDate date
+            @RequestParam LocalDate date,
+            HttpSession session
     ) {
+        User user = authService.getCurrentUser(session);
+        if (user == null) {
+            throw new RuntimeException("User not logged in");
+        }
+
+        authService.requireBillingOrOwner(user);
+
         return ResponseEntity.ok(
                 new ApiResponse<>(
                         true,
@@ -36,7 +48,16 @@ public class ReportController {
 
     // 📦 Stock summary
     @GetMapping("/stock-summary")
-    public ResponseEntity<ApiResponse<List<StockSummaryRow>>> stockSummary() {
+    public ResponseEntity<ApiResponse<List<StockSummaryRow>>> stockSummary(
+            HttpSession session
+    ) {
+        User user = authService.getCurrentUser(session);
+        if (user == null) {
+            throw new RuntimeException("User not logged in");
+        }
+
+        authService.requireBillingOrOwner(user);
+
         return ResponseEntity.ok(
                 new ApiResponse<>(
                         true,
@@ -50,8 +71,16 @@ public class ReportController {
     @GetMapping("/item-sales-old")
     public ResponseEntity<ApiResponse<List<ItemSalesRow>>> itemSalesOld(
             @RequestParam LocalDate from,
-            @RequestParam LocalDate to
+            @RequestParam LocalDate to,
+            HttpSession session
     ) {
+        User user = authService.getCurrentUser(session);
+        if (user == null) {
+            throw new RuntimeException("User not logged in");
+        }
+
+        authService.requireBillingOrOwner(user);
+
         return ResponseEntity.ok(
                 new ApiResponse<>(
                         true,
@@ -65,11 +94,18 @@ public class ReportController {
        🆕 SUMMARY REPORTS
        ========================= */
 
-    // 🆕 Daily sales summary (amount + payment split)
     @GetMapping("/daily-sales-summary")
     public ResponseEntity<ApiResponse<SalesSummaryDto>> dailySalesSummary(
-            @RequestParam LocalDate date
+            @RequestParam LocalDate date,
+            HttpSession session
     ) {
+        User user = authService.getCurrentUser(session);
+        if (user == null) {
+            throw new RuntimeException("User not logged in");
+        }
+
+        authService.requireBillingOrOwner(user);
+
         return ResponseEntity.ok(
                 new ApiResponse<>(
                         true,
@@ -79,12 +115,19 @@ public class ReportController {
         );
     }
 
-    // 🆕 Monthly sales summary
     @GetMapping("/monthly-sales-summary")
     public ResponseEntity<ApiResponse<SalesSummaryDto>> monthlySalesSummary(
             @RequestParam int year,
-            @RequestParam int month
+            @RequestParam int month,
+            HttpSession session
     ) {
+        User user = authService.getCurrentUser(session);
+        if (user == null) {
+            throw new RuntimeException("User not logged in");
+        }
+
+        authService.requireBillingOrOwner(user);
+
         return ResponseEntity.ok(
                 new ApiResponse<>(
                         true,
@@ -95,15 +138,23 @@ public class ReportController {
     }
 
     /* =========================
-       🆕 ADVANCED REPORTS (PHASE-2C)
+       🆕 ADVANCED REPORTS
        ========================= */
 
     // 📈 Item-wise sales (FULFILLED quantity)
     @GetMapping("/item-sales")
     public ResponseEntity<ApiResponse<List<ItemSalesReportDto>>> itemWiseSales(
             @RequestParam LocalDate from,
-            @RequestParam LocalDate to
+            @RequestParam LocalDate to,
+            HttpSession session
     ) {
+        User user = authService.getCurrentUser(session);
+        if (user == null) {
+            throw new RuntimeException("User not logged in");
+        }
+
+        authService.requireBillingOrOwner(user);
+
         return ResponseEntity.ok(
                 new ApiResponse<>(
                         true,
@@ -117,8 +168,16 @@ public class ReportController {
     @GetMapping("/category-sales")
     public ResponseEntity<ApiResponse<List<CategorySalesReportDto>>> categoryWiseSales(
             @RequestParam LocalDate from,
-            @RequestParam LocalDate to
+            @RequestParam LocalDate to,
+            HttpSession session
     ) {
+        User user = authService.getCurrentUser(session);
+        if (user == null) {
+            throw new RuntimeException("User not logged in");
+        }
+
+        authService.requireBillingOrOwner(user);
+
         return ResponseEntity.ok(
                 new ApiResponse<>(
                         true,
@@ -128,12 +187,20 @@ public class ReportController {
         );
     }
 
-    // 📅 Daily sales range (fulfilled-based)
+    // 📅 Daily sales range
     @GetMapping("/daily-sales-range")
     public ResponseEntity<ApiResponse<List<DailySalesReportDto>>> dailySalesRange(
             @RequestParam LocalDate from,
-            @RequestParam LocalDate to
+            @RequestParam LocalDate to,
+            HttpSession session
     ) {
+        User user = authService.getCurrentUser(session);
+        if (user == null) {
+            throw new RuntimeException("User not logged in");
+        }
+
+        authService.requireBillingOrOwner(user);
+
         return ResponseEntity.ok(
                 new ApiResponse<>(
                         true,

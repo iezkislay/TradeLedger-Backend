@@ -3,8 +3,9 @@ package com.store.app.controller;
 import com.store.app.dto.ApiResponse;
 import com.store.app.dto.PartialReturnRequest;
 import com.store.app.entity.User;
-import com.store.app.repository.UserRepository;
+import com.store.app.service.AuthService;
 import com.store.app.service.ReturnService;
+import jakarta.servlet.http.HttpSession;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -13,30 +14,29 @@ import org.springframework.web.bind.annotation.*;
 public class ReturnController {
 
     private final ReturnService returnService;
-    private final UserRepository userRepository;
+    private final AuthService authService;
 
     public ReturnController(
             ReturnService returnService,
-            UserRepository userRepository
+            AuthService authService
     ) {
         this.returnService = returnService;
-        this.userRepository = userRepository;
+        this.authService = authService;
     }
 
     /**
      * 🔁 Partial Return (DELIVERED or PENDING)
-     *
      * POST /api/returns/partial
      */
     @PostMapping("/partial")
     public ResponseEntity<ApiResponse<String>> partialReturn(
-            @RequestBody PartialReturnRequest request
+            @RequestBody PartialReturnRequest request,
+            HttpSession session
     ) {
-        // 🔐 Phase-1 mock auth (same as billing / fulfilment)
-        User user = userRepository.findAll()
-                .stream()
-                .findFirst()
-                .orElseThrow(() -> new RuntimeException("No user found"));
+        User user = authService.getCurrentUser(session);
+        if (user == null) {
+            throw new RuntimeException("User not logged in");
+        }
 
         returnService.partialReturn(request, user);
 

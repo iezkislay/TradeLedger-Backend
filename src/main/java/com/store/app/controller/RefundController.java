@@ -3,8 +3,9 @@ package com.store.app.controller;
 import com.store.app.dto.ApiResponse;
 import com.store.app.dto.RefundRequest;
 import com.store.app.entity.User;
-import com.store.app.repository.UserRepository;
+import com.store.app.service.AuthService;
 import com.store.app.service.RefundService;
+import jakarta.servlet.http.HttpSession;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -13,25 +14,25 @@ import org.springframework.web.bind.annotation.*;
 public class RefundController {
 
     private final RefundService refundService;
-    private final UserRepository userRepo;
+    private final AuthService authService;
 
     public RefundController(
             RefundService refundService,
-            UserRepository userRepo
+            AuthService authService
     ) {
         this.refundService = refundService;
-        this.userRepo = userRepo;
+        this.authService = authService;
     }
 
     @PostMapping
     public ResponseEntity<ApiResponse<String>> refund(
-            @RequestBody RefundRequest request
+            @RequestBody RefundRequest request,
+            HttpSession session
     ) {
-        // Phase-2 mock auth
-        User user = userRepo.findAll()
-                .stream()
-                .findFirst()
-                .orElseThrow(() -> new RuntimeException("No user found"));
+        User user = authService.getCurrentUser(session);
+        if (user == null) {
+            throw new RuntimeException("User not logged in");
+        }
 
         refundService.processRefund(request, user);
 

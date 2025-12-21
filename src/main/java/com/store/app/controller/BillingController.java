@@ -4,8 +4,9 @@ import com.store.app.dto.ApiResponse;
 import com.store.app.dto.CreateBillRequest;
 import com.store.app.entity.Bill;
 import com.store.app.entity.User;
-import com.store.app.repository.UserRepository;
+import com.store.app.service.AuthService;
 import com.store.app.service.BillingService;
+import jakarta.servlet.http.HttpSession;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -16,25 +17,26 @@ import java.util.UUID;
 public class BillingController {
 
     private final BillingService billingService;
-    private final UserRepository userRepository;
+    private final AuthService authService;
 
     public BillingController(
             BillingService billingService,
-            UserRepository userRepository
+            AuthService authService
     ) {
         this.billingService = billingService;
-        this.userRepository = userRepository;
+        this.authService = authService;
     }
 
+    // ✅ Create Bill (OWNER / BILLING)
     @PostMapping
     public ResponseEntity<ApiResponse<Bill>> createBill(
-            @RequestBody CreateBillRequest request
+            @RequestBody CreateBillRequest request,
+            HttpSession session
     ) {
-        // Phase-1: pick any existing user (replace with auth later)
-        User user = userRepository.findAll()
-                .stream()
-                .findFirst()
-                .orElseThrow(() -> new RuntimeException("No user found in system"));
+        User user = authService.getCurrentUser(session);
+        if (user == null) {
+            throw new RuntimeException("User not logged in");
+        }
 
         Bill bill = billingService.createBill(request, user);
 

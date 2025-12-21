@@ -1,11 +1,13 @@
 package com.store.app.entity;
 
+import com.fasterxml.jackson.annotation.JsonManagedReference;
 import com.store.app.enums.PaymentType;
 import jakarta.persistence.*;
 import lombok.*;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
@@ -21,13 +23,9 @@ public class Bill {
     @GeneratedValue
     private UUID id;
 
-    // Human-friendly / date-based code
-    // Example: BILL-20251218-01
     @Column(name = "bill_code", unique = true)
     private String billCode;
 
-    // Sequential bill number
-    // Example: BILL-0001
     @Column(name = "bill_number", nullable = false, unique = true)
     private String billNumber;
 
@@ -48,7 +46,9 @@ public class Bill {
     @Column(nullable = false)
     private LocalDateTime createdAt = LocalDateTime.now();
 
-    // ✅ IMPORTANT: Required for Invoice PDF
-    @OneToMany(mappedBy = "bill", fetch = FetchType.EAGER)
-    private List<BillItem> items;
+    // ✅ FIX 1: initialize list
+    // ✅ FIX 2: prevent infinite JSON loop
+    @OneToMany(mappedBy = "bill", fetch = FetchType.EAGER, cascade = CascadeType.ALL)
+    @JsonManagedReference
+    private List<BillItem> items = new ArrayList<>();
 }

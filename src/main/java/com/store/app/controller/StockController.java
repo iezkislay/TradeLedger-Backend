@@ -4,12 +4,13 @@ import com.store.app.dto.ApiResponse;
 import com.store.app.dto.StockAdjustmentRequest;
 import com.store.app.entity.Stock;
 import com.store.app.entity.User;
-import com.store.app.repository.UserRepository;
+import com.store.app.service.AuthService;
 import com.store.app.service.StockService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import jakarta.servlet.http.HttpSession;
 import java.util.List;
 
 @RestController
@@ -18,17 +19,18 @@ import java.util.List;
 public class StockController {
 
     private final StockService stockService;
-    private final UserRepository userRepository;
+    private final AuthService authService;
 
     // 🔧 Manual stock adjustment (OWNER)
     @PostMapping("/adjust")
     public ResponseEntity<ApiResponse<String>> adjustStock(
-            @RequestBody StockAdjustmentRequest request
+            @RequestBody StockAdjustmentRequest request,
+            HttpSession session
     ) {
-        User user = userRepository.findAll()
-                .stream()
-                .findFirst()
-                .orElseThrow(() -> new RuntimeException("No user found"));
+        User user = authService.getCurrentUser(session);
+        if (user == null) {
+            throw new RuntimeException("User not logged in");
+        }
 
         stockService.adjustStock(request, user);
 
@@ -40,7 +42,6 @@ public class StockController {
     // 📦 Stock summary (all items)
     @GetMapping("/summary")
     public ResponseEntity<ApiResponse<List<Stock>>> getStockSummary() {
-
         return ResponseEntity.ok(
                 new ApiResponse<>(
                         true,
@@ -53,7 +54,6 @@ public class StockController {
     // 🟡 Low stock items
     @GetMapping("/low-stock")
     public ResponseEntity<ApiResponse<List<Stock>>> getLowStockItems() {
-
         return ResponseEntity.ok(
                 new ApiResponse<>(
                         true,

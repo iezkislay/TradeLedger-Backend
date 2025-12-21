@@ -3,8 +3,9 @@ package com.store.app.controller;
 import com.store.app.dto.ApiResponse;
 import com.store.app.entity.BillItem;
 import com.store.app.entity.User;
-import com.store.app.repository.UserRepository;
+import com.store.app.service.AuthService;
 import com.store.app.service.FulfilmentService;
+import jakarta.servlet.http.HttpSession;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -17,26 +18,27 @@ import java.util.UUID;
 public class FulfilmentController {
 
     private final FulfilmentService fulfilmentService;
-    private final UserRepository userRepo;
+    private final AuthService authService;
 
     public FulfilmentController(
             FulfilmentService fulfilmentService,
-            UserRepository userRepo
+            AuthService authService
     ) {
         this.fulfilmentService = fulfilmentService;
-        this.userRepo = userRepo;
+        this.authService = authService;
     }
 
-    // ✅ Fulfil pending quantity
+    // ✅ Fulfil pending quantity (OWNER / BILLING)
     @PostMapping("/{billItemId}")
     public ResponseEntity<ApiResponse<String>> fulfil(
             @PathVariable UUID billItemId,
-            @RequestParam BigDecimal quantity
+            @RequestParam BigDecimal quantity,
+            HttpSession session
     ) {
-        User user = userRepo.findAll()
-                .stream()
-                .findFirst()
-                .orElseThrow(() -> new RuntimeException("No user found"));
+        User user = authService.getCurrentUser(session);
+        if (user == null) {
+            throw new RuntimeException("User not logged in");
+        }
 
         fulfilmentService.fulfil(billItemId, quantity, user);
 
@@ -45,9 +47,15 @@ public class FulfilmentController {
         );
     }
 
-    // 📊 Pending fulfilment report
+    // 📊 Pending fulfilment report (OWNER / BILLING)
     @GetMapping("/pending")
-    public ResponseEntity<ApiResponse<List<BillItem>>> pending() {
+    public ResponseEntity<ApiResponse<List<BillItem>>> pending(
+            HttpSession session
+    ) {
+        User user = authService.getCurrentUser(session);
+        if (user == null) {
+            throw new RuntimeException("User not logged in");
+        }
 
         return ResponseEntity.ok(
                 new ApiResponse<>(
