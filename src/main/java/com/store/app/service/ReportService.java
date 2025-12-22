@@ -28,17 +28,14 @@ public class ReportService {
        🟢 OLD REPORTS (KEEP AS-IS)
        ========================= */
 
-    // Existing daily sales (single date, row-based)
     public List<DailySalesReportRow> dailySales(LocalDate date) {
         return reportRepo.dailySales(date);
     }
 
-    // Existing stock summary
     public List<StockSummaryRow> stockSummary() {
         return reportRepo.stockSummary();
     }
 
-    // Existing item sales (requested quantity based)
     public List<ItemSalesRow> itemSales(LocalDate from, LocalDate to) {
         return reportRepo.itemSales(from, to);
     }
@@ -47,14 +44,12 @@ public class ReportService {
        🆕 SUMMARY REPORTS (PHASE-2A)
        ========================= */
 
-    // Daily sales summary (amount + count + payment split)
     public SalesSummaryDto dailySalesSummary(LocalDate date) {
         LocalDateTime start = date.atStartOfDay();
         LocalDateTime end = date.plusDays(1).atStartOfDay();
         return buildSummary(start, end);
     }
 
-    // Monthly sales summary
     public SalesSummaryDto monthlySalesSummary(int year, int month) {
         LocalDate startDate = LocalDate.of(year, month, 1);
         LocalDateTime start = startDate.atStartOfDay();
@@ -66,28 +61,49 @@ public class ReportService {
        🆕 ADVANCED REPORTS (PHASE-2C)
        ========================= */
 
-    // Item-wise sales (fulfilled quantity)
+    // ✅ FIXED: Item-wise sales (fulfilled qty)
     public List<ItemSalesReportDto> itemWiseSales(
             LocalDate from,
             LocalDate to
     ) {
-        return reportRepo.itemWiseSales(from, to);
+        return reportRepo.itemWiseSalesRaw(from, to)
+                .stream()
+                .map(r -> new ItemSalesReportDto(
+                        (String) r[0],           // itemName
+                        (String) r[1],           // category
+                        (BigDecimal) r[2],       // quantitySold
+                        (BigDecimal) r[3]        // totalAmount
+                ))
+                .toList();
     }
 
-    // Category-wise sales
+    // ✅ FIXED: Category-wise sales
     public List<CategorySalesReportDto> categoryWiseSales(
             LocalDate from,
             LocalDate to
     ) {
-        return reportRepo.categoryWiseSales(from, to);
+        return reportRepo.categoryWiseSalesRaw(from, to)
+                .stream()
+                .map(r -> new CategorySalesReportDto(
+                        (String) r[0],           // category
+                        (BigDecimal) r[1],       // quantitySold
+                        (BigDecimal) r[2]        // totalAmount
+                ))
+                .toList();
     }
 
-    // Daily sales over a date range (fulfilled-based)
+    // ✅ FIXED: Daily sales range
     public List<DailySalesReportDto> dailySalesRange(
             LocalDate from,
             LocalDate to
     ) {
-        return reportRepo.dailySales(from, to);
+        return reportRepo.dailySalesRangeRaw(from, to)
+                .stream()
+                .map(r -> new DailySalesReportDto(
+                        ((java.sql.Date) r[0]).toLocalDate(),
+                        (BigDecimal) r[1]
+                ))
+                .toList();
     }
 
     /* =========================

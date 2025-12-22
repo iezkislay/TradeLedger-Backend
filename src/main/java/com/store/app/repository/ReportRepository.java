@@ -15,7 +15,6 @@ public interface ReportRepository extends Repository<Bill, UUID> {
     // 🟢 EXISTING REPORTS (KEEP)
     // =========================
 
-    // Daily sales (single date)
     @Query(value = """
         SELECT
             DATE(created_at) AS date,
@@ -27,7 +26,6 @@ public interface ReportRepository extends Repository<Bill, UUID> {
         """, nativeQuery = true)
     List<DailySalesReportRow> dailySales(LocalDate date);
 
-    // Stock summary
     @Query(value = """
         SELECT
             i.id AS itemId,
@@ -39,7 +37,6 @@ public interface ReportRepository extends Repository<Bill, UUID> {
         """, nativeQuery = true)
     List<StockSummaryRow> stockSummary();
 
-    // Item sales (OLD – based on requested quantity)
     @Query(value = """
         SELECT
             i.id AS itemId,
@@ -55,60 +52,50 @@ public interface ReportRepository extends Repository<Bill, UUID> {
         """, nativeQuery = true)
     List<ItemSalesRow> itemSales(LocalDate from, LocalDate to);
 
-
     // =========================
-    // 🆕 NEW PHASE-2 REPORTS
+    // 🆕 PHASE-2 REPORTS (FIXED)
     // =========================
 
-    // 1️⃣ Item-wise sales (based on fulfilled quantity)
+    // 1️⃣ Item-wise sales (fulfilled qty)
     @Query(value = """
-        SELECT 
-            i.name AS itemName,
-            i.category AS category,
-            SUM(bi.fulfilled_qty) AS quantitySold,
-            SUM(bi.fulfilled_qty * bi.price) AS totalAmount
+        SELECT
+            i.name,
+            i.category,
+            SUM(bi.fulfilled_qty),
+            SUM(bi.fulfilled_qty * bi.price)
         FROM bill_items bi
         JOIN items i ON bi.item_id = i.id
         JOIN bills b ON bi.bill_id = b.id
-        WHERE b.created_at BETWEEN :from AND :to
+        WHERE DATE(b.created_at) BETWEEN :from AND :to
         GROUP BY i.name, i.category
-        ORDER BY totalAmount DESC
+        ORDER BY 4 DESC
         """, nativeQuery = true)
-    List<ItemSalesReportDto> itemWiseSales(
-            LocalDate from,
-            LocalDate to
-    );
+    List<Object[]> itemWiseSalesRaw(LocalDate from, LocalDate to);
 
     // 2️⃣ Category-wise sales
     @Query(value = """
-        SELECT 
-            i.category AS category,
-            SUM(bi.fulfilled_qty) AS quantitySold,
-            SUM(bi.fulfilled_qty * bi.price) AS totalAmount
+        SELECT
+            i.category,
+            SUM(bi.fulfilled_qty),
+            SUM(bi.fulfilled_qty * bi.price)
         FROM bill_items bi
         JOIN items i ON bi.item_id = i.id
         JOIN bills b ON bi.bill_id = b.id
-        WHERE b.created_at BETWEEN :from AND :to
+        WHERE DATE(b.created_at) BETWEEN :from AND :to
         GROUP BY i.category
-        ORDER BY totalAmount DESC
+        ORDER BY 3 DESC
         """, nativeQuery = true)
-    List<CategorySalesReportDto> categoryWiseSales(
-            LocalDate from,
-            LocalDate to
-    );
+    List<Object[]> categoryWiseSalesRaw(LocalDate from, LocalDate to);
 
-    // 3️⃣ Daily sales (date range, NEW version)
+    // 3️⃣ Daily sales range
     @Query(value = """
-        SELECT 
-            DATE(b.created_at) AS date,
-            SUM(b.total_amount) AS totalSales
+        SELECT
+            DATE(b.created_at),
+            SUM(b.total_amount)
         FROM bills b
         WHERE DATE(b.created_at) BETWEEN :from AND :to
         GROUP BY DATE(b.created_at)
-        ORDER BY date
+        ORDER BY 1
         """, nativeQuery = true)
-    List<DailySalesReportDto> dailySales(
-            LocalDate from,
-            LocalDate to
-    );
+    List<Object[]> dailySalesRangeRaw(LocalDate from, LocalDate to);
 }
