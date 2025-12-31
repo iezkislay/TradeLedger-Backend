@@ -1,6 +1,8 @@
 package com.store.app.service;
 
+import com.store.app.dto.LowStockItemResponse;
 import com.store.app.dto.StockAdjustmentRequest;
+import com.store.app.dto.StockSummaryDto;
 import com.store.app.entity.Item;
 import com.store.app.entity.Stock;
 import com.store.app.entity.StockTransaction;
@@ -16,6 +18,7 @@ import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
@@ -27,17 +30,52 @@ public class StockService {
     private final AuthService authService;
     private final AuditService auditService;
 
-    // 📦 Stock summary
+    /* =====================================================
+       📦 STOCK SUMMARY (ENTITY — INTERNAL USE)
+       ===================================================== */
+
+    /**
+     * ⚠️ INTERNAL USE ONLY
+     * Returns entities — NOT SAFE for controller JSON
+     */
     public List<Stock> getStockSummary() {
         return stockRepo.findAll();
     }
 
-    // 🟡 Low stock items
-    public List<Stock> getLowStockItems() {
-        return stockRepo.findLowStockItems();
+    /* =====================================================
+       🟢 STOCK SUMMARY (DTO — API SAFE)
+       ===================================================== */
+
+    /**
+     * ✅ SAFE FOR CONTROLLER
+     * Uses DTO projection → no lazy loading issues
+     */
+    public List<StockSummaryDto> getStockSummaryDto() {
+        return stockRepo.fetchStockSummary();
     }
 
-    // 🔧 Manual stock adjustment (OWNER ONLY)
+    /* =====================================================
+       🟡 LOW STOCK ITEMS (DTO — API SAFE)
+       ===================================================== */
+
+    public List<LowStockItemResponse> getLowStockItems() {
+
+        return stockRepo.findLowStockRaw().stream()
+                .map(r -> {
+                    LowStockItemResponse dto = new LowStockItemResponse();
+                    dto.setItemId((UUID) r[0]);
+                    dto.setItemName((String) r[1]);
+                    dto.setAvailableQty((BigDecimal) r[2]);
+                    dto.setMinStock((BigDecimal) r[3]);
+                    return dto;
+                })
+                .toList();
+    }
+
+    /* =====================================================
+       🔧 MANUAL STOCK ADJUSTMENT (OWNER ONLY)
+       ===================================================== */
+
     @Transactional
     public void adjustStock(StockAdjustmentRequest request, User user) {
 

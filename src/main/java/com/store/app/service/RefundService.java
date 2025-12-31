@@ -2,6 +2,7 @@ package com.store.app.service;
 
 import com.store.app.dto.RefundRequest;
 import com.store.app.entity.*;
+import com.store.app.enums.LedgerType;
 import com.store.app.enums.RefundMode;
 import com.store.app.repository.*;
 import jakarta.transaction.Transactional;
@@ -46,7 +47,7 @@ public class RefundService {
 
         BigDecimal amount = req.getAmount();
 
-        if (amount == null || amount.compareTo(BigDecimal.ZERO) <= 0) {
+        if (amount == null || amount.signum() <= 0) {
             throw new RuntimeException("Refund amount must be positive");
         }
 
@@ -72,26 +73,19 @@ public class RefundService {
 
         refundRepo.save(refund);
 
-        // 2️⃣ CREDIT refund → ledger + balance update
+        // 2️⃣ CREDIT refund → ledger (SOURCE OF TRUTH)
         if (req.getRefundMode() == RefundMode.CREDIT) {
 
             Customer customer = bill.getCustomer();
-
             if (customer == null) {
                 throw new RuntimeException("CREDIT refund requires customer");
             }
 
-            // Update customer balance
-            customer.setBalance(
-                    customer.getBalance().subtract(amount)
-            );
-            customerRepo.save(customer);
-
-            // Ledger entry
             CustomerLedger ledger = new CustomerLedger();
             ledger.setCustomer(customer);
             ledger.setBill(bill);
-            ledger.setCredit(amount);
+            ledger.setEntryType(LedgerType.CREDIT);
+            ledger.setAmount(amount);
 
             ledgerRepo.save(ledger);
         }

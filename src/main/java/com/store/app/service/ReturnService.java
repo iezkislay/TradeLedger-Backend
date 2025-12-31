@@ -2,6 +2,7 @@ package com.store.app.service;
 
 import com.store.app.dto.PartialReturnRequest;
 import com.store.app.entity.*;
+import com.store.app.enums.LedgerType;
 import com.store.app.enums.PaymentType;
 import com.store.app.enums.ReferenceType;
 import com.store.app.enums.ReturnType;
@@ -18,7 +19,6 @@ public class ReturnService {
     private final BillItemRepository billItemRepo;
     private final StockRepository stockRepo;
     private final StockTransactionRepository stockTxnRepo;
-    private final CustomerRepository customerRepo;
     private final CustomerLedgerRepository ledgerRepo;
     private final AuthService authService;
     private final AuditService auditService;
@@ -27,7 +27,6 @@ public class ReturnService {
             BillItemRepository billItemRepo,
             StockRepository stockRepo,
             StockTransactionRepository stockTxnRepo,
-            CustomerRepository customerRepo,
             CustomerLedgerRepository ledgerRepo,
             AuthService authService,
             AuditService auditService
@@ -35,7 +34,6 @@ public class ReturnService {
         this.billItemRepo = billItemRepo;
         this.stockRepo = stockRepo;
         this.stockTxnRepo = stockTxnRepo;
-        this.customerRepo = customerRepo;
         this.ledgerRepo = ledgerRepo;
         this.authService = authService;
         this.auditService = auditService;
@@ -54,8 +52,7 @@ public class ReturnService {
                 .orElseThrow(() -> new RuntimeException("Bill item not found"));
 
         BigDecimal qty = req.getQuantity();
-
-        if (qty == null || qty.compareTo(BigDecimal.ZERO) <= 0) {
+        if (qty == null || qty.signum() <= 0) {
             throw new RuntimeException("Return quantity must be greater than zero");
         }
 
@@ -86,7 +83,6 @@ public class ReturnService {
             txn.setReferenceId(bill.getId());
             stockTxnRepo.save(txn);
 
-            // Update delivered qty
             bi.setFulfilledQty(bi.getFulfilledQty().subtract(qty));
         }
 
@@ -99,7 +95,6 @@ public class ReturnService {
                 throw new RuntimeException("Return exceeds pending quantity");
             }
 
-            // No stock movement
             bi.setPendingQty(bi.getPendingQty().subtract(qty));
         }
 
@@ -112,17 +107,32 @@ public class ReturnService {
         // =========================
         bi.setQuantity(bi.getQuantity().subtract(qty));
 
-        // Update fulfilment status
-        if (bi.getPendingQty().compareTo(BigDecimal.ZERO) == 0 &&
-                bi.getFulfilledQty().compareTo(BigDecimal.ZERO) > 0) {
+        if (bi.getPendingQty().signum() == 0 && bi.getFulfilledQty().signum() > 0) {
             bi.setFulfilmentStatus("FULL");
-        } else if (bi.getFulfilledQty().compareTo(BigDecimal.ZERO) == 0) {
+        } else if (bi.getFulfilledQty().signum() == 0) {
             bi.setFulfilmentStatus("PENDING");
         } else {
             bi.setFulfilmentStatus("PARTIAL");
         }
 
         billItemRepo.save(bi);
+
+        // =========================
+        // LEDGER (CREDIT → RETURN)
+        // =========================
+        if (bill.getPaymentType() == PaymentType.CREDIT &&
+                bill.getCustomer() != null) {
+
+            BigDecimal refundAmount = bi.getPrice().multiply(qty);
+
+            CustomerLedger ledger = new CustomerLedger();
+            ledger.setCustomer(bill.getCustomer());
+            ledger.setBill(bill);
+            ledger.setEntryType(LedgerType.CREDIT);
+            ledger.setAmount(refundAmount);
+
+            ledgerRepo.save(ledger);
+        }
 
         // =========================
         // AUDIT LOG
@@ -132,31 +142,10 @@ public class ReturnService {
                 bill.getId(),
                 "PARTIAL_RETURN",
                 null,
-                "Type=" + req.getReturnType() + ", Qty=" + qty +
+                "Type=" + req.getReturnType() +
+                        ", Qty=" + qty +
                         ", Reason=" + req.getReason(),
                 user
         );
-
-        // =========================
-        // LEDGER (CREDIT ONLY)
-        // =========================
-        if (bill.getPaymentType() == PaymentType.CREDIT &&
-                bill.getCustomer() != null) {
-
-            Customer customer = bill.getCustomer();
-            BigDecimal refundAmount = bi.getPrice().multiply(qty);
-
-            customer.setBalance(
-                    customer.getBalance().subtract(refundAmount)
-            );
-            customerRepo.save(customer);
-
-            CustomerLedger ledger = new CustomerLedger();
-            ledger.setCustomer(customer);
-            ledger.setBill(bill);
-            ledger.setCredit(refundAmount);
-
-            ledgerRepo.save(ledger);
-        }
     }
 }

@@ -1,34 +1,45 @@
 package com.store.app.service;
 
+import com.store.app.dto.ItemSearchResponse;
 import com.store.app.entity.Item;
 import com.store.app.entity.User;
 import com.store.app.enums.ItemCategory;
 import com.store.app.repository.ItemRepository;
+import com.store.app.repository.StockRepository;
 import com.store.app.repository.StockTransactionRepository;
 import jakarta.transaction.Transactional;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 
+import java.util.List;
 import java.util.UUID;
 
 @Service
 public class ItemService {
 
     private final ItemRepository itemRepo;
+    private final StockRepository stockRepo;
     private final StockTransactionRepository stockTxnRepo;
     private final AuthService authService;
     private final AuditService auditService;
 
     public ItemService(
             ItemRepository itemRepo,
+            StockRepository stockRepo,
             StockTransactionRepository stockTxnRepo,
             AuthService authService,
             AuditService auditService
     ) {
         this.itemRepo = itemRepo;
+        this.stockRepo = stockRepo;
         this.stockTxnRepo = stockTxnRepo;
         this.authService = authService;
         this.auditService = auditService;
     }
+
+    /* =====================================================
+       ITEM MANAGEMENT (OWNER ONLY)
+       ===================================================== */
 
     // 🔒 OWNER ONLY
     @Transactional
@@ -63,15 +74,21 @@ public class ItemService {
 
         if (isLocked) {
             if (!existing.getCategory().equals(updated.getCategory())) {
-                throw new RuntimeException("Item category cannot be changed after sale/stock movement");
+                throw new RuntimeException(
+                        "Item category cannot be changed after sale/stock movement"
+                );
             }
 
             if (!existing.getBaseUnit().equals(updated.getBaseUnit())) {
-                throw new RuntimeException("Item unit cannot be changed after sale/stock movement");
+                throw new RuntimeException(
+                        "Item unit cannot be changed after sale/stock movement"
+                );
             }
 
             if (!existing.getItemCode().equals(updated.getItemCode())) {
-                throw new RuntimeException("Item code cannot be changed");
+                throw new RuntimeException(
+                        "Item code cannot be changed"
+                );
             }
         }
 
@@ -98,5 +115,32 @@ public class ItemService {
         existing.setMinStock(updated.getMinStock());
 
         return itemRepo.save(existing);
+    }
+
+    /* =====================================================
+       BILLING — SAFE SEARCH (READ ONLY)
+       ===================================================== */
+
+    /**
+     * Used ONLY by billing UI
+     * - No mutation
+     * - No price exposure beyond selling price
+     * - Stock is read-only hint (not reservation)
+     */
+    public List<ItemSearchResponse> searchForBilling(String q) {
+
+        List<Item> items =
+                itemRepo.search(q, PageRequest.of(0, 20));
+
+        return items.stream()
+                .map(i -> new ItemSearchResponse(
+                        i.getId(),
+                        i.getItemCode(),
+                        i.getName(),
+                        i.getBaseUnit().name(),
+                        i.getSellingPrice(),
+                        stockRepo.findAvailableQty(i.getId())
+                ))
+                .toList();
     }
 }

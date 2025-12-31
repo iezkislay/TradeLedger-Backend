@@ -1,6 +1,7 @@
 package com.store.app.controller;
 
 import com.store.app.dto.ApiResponse;
+import com.store.app.dto.ItemSearchResponse;
 import com.store.app.entity.Item;
 import com.store.app.entity.User;
 import com.store.app.service.AuthService;
@@ -9,6 +10,7 @@ import jakarta.servlet.http.HttpSession;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
 import java.util.UUID;
 
 @RestController
@@ -25,6 +27,10 @@ public class ItemController {
         this.itemService = itemService;
         this.authService = authService;
     }
+
+    /* =====================================================
+       ITEM MANAGEMENT (OWNER ONLY)
+       ===================================================== */
 
     // ✅ Create Item (OWNER)
     @PostMapping
@@ -55,5 +61,26 @@ public class ItemController {
         return ResponseEntity.ok(
                 new ApiResponse<>(true, updated, "Item updated successfully")
         );
+    }
+
+    /* =====================================================
+       BILLING — SAFE SEARCH (READ ONLY)
+       ===================================================== */
+
+    /**
+     * Used by billing UI only
+     * - No mutation
+     * - No auth role restriction (billing staff allowed)
+     * - Min query length enforced to avoid table scans
+     */
+    @GetMapping("/search")
+    public List<ItemSearchResponse> search(
+            @RequestParam(required = false) String q
+    ) {
+        if (q == null || q.trim().length() < 2) {
+            return List.of();
+        }
+
+        return itemService.searchForBilling(q.trim());
     }
 }

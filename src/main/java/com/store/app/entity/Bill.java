@@ -36,6 +36,21 @@ public class Bill {
     @ManyToOne
     private Customer customer;
 
+    /**
+     * ✅ NEW: Sum of all bill item line amounts (before discount)
+     */
+    @Column(nullable = false)
+    private BigDecimal subtotal = BigDecimal.ZERO;
+
+    /**
+     * ✅ NEW: Flat discount applied on bill (₹)
+     */
+    @Column(nullable = false)
+    private BigDecimal discountAmount = BigDecimal.ZERO;
+
+    /**
+     * Final payable amount after discount
+     */
     @Column(nullable = false)
     private BigDecimal totalAmount;
 

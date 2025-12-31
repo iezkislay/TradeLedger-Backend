@@ -1,7 +1,10 @@
 package com.store.app.controller;
 
 import com.store.app.dto.ApiResponse;
+import com.store.app.dto.BillPrintResponse;
+import com.store.app.dto.BillResponse;
 import com.store.app.dto.CreateBillRequest;
+import com.store.app.dto.SettleBillRequest;
 import com.store.app.entity.Bill;
 import com.store.app.entity.User;
 import com.store.app.service.AuthService;
@@ -27,7 +30,9 @@ public class BillingController {
         this.authService = authService;
     }
 
-    // ✅ Create Bill (OWNER / BILLING)
+    // =====================================================
+    // ✅ CREATE BILL (OWNER / BILLING)
+    // =====================================================
     @PostMapping
     public ResponseEntity<ApiResponse<Bill>> createBill(
             @RequestBody CreateBillRequest request,
@@ -45,10 +50,60 @@ public class BillingController {
         );
     }
 
+    // =====================================================
+    // ✅ GET BILL BY ID (READ-SAFE)
+    // =====================================================
     @GetMapping("/{id}")
-    public ResponseEntity<ApiResponse<String>> getBill(@PathVariable UUID id) {
+    public ResponseEntity<ApiResponse<BillResponse>> getBill(
+            @PathVariable UUID id,
+            HttpSession session
+    ) {
+        User user = authService.getCurrentUser(session);
+        if (user == null) {
+            throw new RuntimeException("User not logged in");
+        }
+
         return ResponseEntity.ok(
-                new ApiResponse<>(true, null, "Get bill by ID (Phase-2)")
+                new ApiResponse<>(
+                        true,
+                        billingService.getBillById(id),
+                        "Bill loaded"
+                )
+        );
+    }
+
+    // =====================================================
+    // 🖨️ PRINT BILL (READ-ONLY, ROLE PROTECTED)
+    // =====================================================
+    @GetMapping("/{id}/print")
+    public ResponseEntity<BillPrintResponse> printBill(
+            @PathVariable UUID id,
+            HttpSession session
+    ) {
+        User user = authService.getCurrentUser(session);
+        authService.requireBillingOrOwner(user);
+
+        return ResponseEntity.ok(
+                billingService.getBillForPrint(id)
+        );
+    }
+
+    // =====================================================
+    // 💰 SETTLE BILL (PARTIAL / FINAL / WAIVER)
+    // =====================================================
+    @PostMapping("/{billId}/settle")
+    public ResponseEntity<ApiResponse<Void>> settleBill(
+            @PathVariable UUID billId,
+            @RequestBody SettleBillRequest request,
+            HttpSession session
+    ) {
+        User user = authService.getCurrentUser(session);
+        authService.requireBillingOrOwner(user);
+
+        billingService.settleBill(billId, request, user);
+
+        return ResponseEntity.ok(
+                new ApiResponse<>(true, null, "Bill settled successfully")
         );
     }
 }

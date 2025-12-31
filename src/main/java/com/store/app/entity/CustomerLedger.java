@@ -1,7 +1,9 @@
 package com.store.app.entity;
 
+import com.store.app.enums.LedgerType;
 import jakarta.persistence.*;
-import lombok.*;
+import lombok.Getter;
+import lombok.Setter;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -11,8 +13,6 @@ import java.util.UUID;
 @Table(name = "customer_ledger")
 @Getter
 @Setter
-@NoArgsConstructor
-@AllArgsConstructor
 public class CustomerLedger {
 
     @Id
@@ -20,13 +20,29 @@ public class CustomerLedger {
     private UUID id;
 
     @ManyToOne(optional = false)
+    @JoinColumn(name = "customer_id")
     private Customer customer;
 
     @ManyToOne
+    @JoinColumn(name = "bill_id")
     private Bill bill;
 
-    private BigDecimal debit = BigDecimal.ZERO;
-    private BigDecimal credit = BigDecimal.ZERO;
+    /**
+     * DEBIT  → Bill raised
+     * CREDIT → Payment received
+     * ADJUSTMENT → Waiver / rounding / discount
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "entry_type", nullable = false)
+    private LedgerType entryType;
 
+    /**
+     * Always POSITIVE
+     * Meaning decided by entryType
+     */
+    @Column(nullable = false, precision = 10, scale = 2)
+    private BigDecimal amount;
+
+    @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt = LocalDateTime.now();
 }

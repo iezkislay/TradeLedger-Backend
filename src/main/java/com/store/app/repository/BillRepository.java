@@ -1,8 +1,6 @@
 package com.store.app.repository;
 
 import com.store.app.entity.Bill;
-import com.store.app.entity.BillItem;
-import com.store.app.enums.PaymentType;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 
@@ -50,7 +48,7 @@ public interface BillRepository extends JpaRepository<Bill, UUID> {
     );
 
     /* =====================================================
-       DASHBOARD — PHASE 3B (READ-ONLY, SAFE ADDITIONS)
+       DASHBOARD — PHASE 3B (EXISTING)
        ===================================================== */
 
     // 🔥 Today sales
@@ -78,7 +76,7 @@ public interface BillRepository extends JpaRepository<Bill, UUID> {
     """)
     BigDecimal avgBillValue(LocalDate date);
 
-    // 💳 Payment split (raw)
+    // 💳 Payment split (single day – raw)
     @Query("""
         SELECT b.paymentType, COALESCE(SUM(b.totalAmount), 0)
         FROM Bill b
@@ -87,7 +85,7 @@ public interface BillRepository extends JpaRepository<Bill, UUID> {
     """)
     List<Object[]> paymentSplitRaw(LocalDate date);
 
-    // 💳 Payment split (clean Map for DTO)
+    // 💳 Payment split (single day – clean Map)
     default Map<String, BigDecimal> paymentSplit(LocalDate date) {
         return paymentSplitRaw(date)
                 .stream()
@@ -97,7 +95,7 @@ public interface BillRepository extends JpaRepository<Bill, UUID> {
                 ));
     }
 
-    // 🚚 Pending fulfilment value (money already collected)
+    // 🚚 Pending fulfilment value
     @Query("""
         SELECT COALESCE(SUM(bi.pendingQty * bi.price), 0)
         FROM BillItem bi
@@ -111,4 +109,35 @@ public interface BillRepository extends JpaRepository<Bill, UUID> {
         WHERE bi.pendingQty > 0
     """)
     Long totalPendingItems();
+
+    /* =====================================================
+       DASHBOARD — RANGE-BASED (NEW, SAFE ADDITIONS)
+       ===================================================== */
+
+    // 💳 Payment split (date range)
+    @Query("""
+        SELECT b.paymentType, COALESCE(SUM(b.totalAmount), 0)
+        FROM Bill b
+        WHERE DATE(b.createdAt) BETWEEN :from AND :to
+        GROUP BY b.paymentType
+    """)
+    List<Object[]> paymentSplit(LocalDate from, LocalDate to);
+
+    // 📈 Sales trend (date → sales)
+    @Query("""
+        SELECT DATE(b.createdAt), COALESCE(SUM(b.totalAmount), 0)
+        FROM Bill b
+        WHERE DATE(b.createdAt) BETWEEN :from AND :to
+        GROUP BY DATE(b.createdAt)
+        ORDER BY DATE(b.createdAt)
+    """)
+    List<Object[]> salesTrend(LocalDate from, LocalDate to);
+
+    // 📊 Average bill value (range)
+    @Query("""
+        SELECT COALESCE(AVG(b.totalAmount), 0)
+        FROM Bill b
+        WHERE DATE(b.createdAt) BETWEEN :from AND :to
+    """)
+    BigDecimal avgBillValue(LocalDate from, LocalDate to);
 }

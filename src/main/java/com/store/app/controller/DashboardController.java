@@ -3,6 +3,7 @@ package com.store.app.controller;
 import com.store.app.dto.ApiResponse;
 import com.store.app.dto.DashboardResponse;
 import com.store.app.dto.DashboardKpiResponse;
+import com.store.app.dto.DashboardSummaryResponse;
 import com.store.app.entity.User;
 import com.store.app.service.AuthService;
 import com.store.app.service.DashboardService;
@@ -10,6 +11,8 @@ import jakarta.servlet.http.HttpSession;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+
+import java.time.LocalDate;
 
 @RestController
 @RequestMapping("/api/dashboard")
@@ -20,8 +23,9 @@ public class DashboardController {
     private final AuthService authService;
 
     /**
-     * OLD ENDPOINT (UNCHANGED)
-     * Used for full dashboard data
+     * =========================
+     * FULL DASHBOARD (LEGACY)
+     * =========================
      * Access: OWNER only
      */
     @GetMapping
@@ -41,9 +45,10 @@ public class DashboardController {
     }
 
     /**
-     * NEW ENDPOINT (ADDED)
-     * Used for KPI widgets
-     * Access: OWNER only (kept consistent with dashboard)
+     * =========================
+     * KPI DASHBOARD (WIDGETS)
+     * =========================
+     * Access: OWNER only
      */
     @GetMapping("/kpis")
     public ResponseEntity<ApiResponse<DashboardKpiResponse>> getKpis(
@@ -57,6 +62,32 @@ public class DashboardController {
                         true,
                         dashboardService.getKpis(),
                         "Dashboard KPIs loaded"
+                )
+        );
+    }
+
+    /**
+     * =========================
+     * DASHBOARD SUMMARY (RANGE)
+     * =========================
+     * Example:
+     * /api/dashboard/summary?from=2025-03-01&to=2025-03-31
+     * Access: OWNER only
+     */
+    @GetMapping("/summary")
+    public ResponseEntity<ApiResponse<DashboardSummaryResponse>> summary(
+            @RequestParam LocalDate from,
+            @RequestParam LocalDate to,
+            HttpSession session
+    ) {
+        User user = authService.getCurrentUser(session);
+        authService.requireOwner(user);
+
+        return ResponseEntity.ok(
+                new ApiResponse<>(
+                        true,
+                        dashboardService.getDashboardSummary(from, to),
+                        "Dashboard summary loaded"
                 )
         );
     }

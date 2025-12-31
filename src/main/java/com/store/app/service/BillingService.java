@@ -1,20 +1,22 @@
 package com.store.app.service;
 
-import com.store.app.dto.BillItemRequest;
-import com.store.app.dto.CreateBillRequest;
+import com.store.app.dto.*;
 import com.store.app.entity.*;
+import com.store.app.enums.LedgerType;
 import com.store.app.enums.PaymentType;
 import com.store.app.enums.ReferenceType;
 import com.store.app.enums.StockTxnType;
 import com.store.app.repository.*;
 import com.store.app.util.WhatsAppTemplates;
 import jakarta.transaction.Transactional;
+import lombok.Getter;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.UUID;
 
 @Service
 public class BillingService {
@@ -22,13 +24,19 @@ public class BillingService {
     private final ItemRepository itemRepo;
     private final StockRepository stockRepo;
     private final BillRepository billRepo;
+
+    @Getter
     private final BillItemRepository billItemRepo;
+
     private final StockTransactionRepository stockTxnRepo;
     private final CustomerRepository customerRepo;
     private final CustomerLedgerRepository ledgerRepo;
+    private final CustomerService customerService;
     private final ValidationService validationService;
     private final AuthService authService;
     private final AuditService auditService;
+
+    @Getter
     private final NotificationService notificationService;
 
     public BillingService(
@@ -39,6 +47,7 @@ public class BillingService {
             StockTransactionRepository stockTxnRepo,
             CustomerRepository customerRepo,
             CustomerLedgerRepository ledgerRepo,
+            CustomerService customerService,
             ValidationService validationService,
             AuthService authService,
             AuditService auditService,
@@ -51,81 +60,120 @@ public class BillingService {
         this.stockTxnRepo = stockTxnRepo;
         this.customerRepo = customerRepo;
         this.ledgerRepo = ledgerRepo;
+        this.customerService = customerService;
         this.validationService = validationService;
         this.authService = authService;
         this.auditService = auditService;
         this.notificationService = notificationService;
     }
 
+    /* =====================================================
+       CREATE BILL — CREDIT CUSTOMER FIX
+       ===================================================== */
     @Transactional
-    public Bill createBill(CreateBillRequest request, User user) {
+    public Bill createBill(CreateBillRequest req, User user) {
 
         authService.requireBillingOrOwner(user);
+        validationService.validateBillItems(req.getItems());
+
+        Customer customer = null;
+
+        if (req.getCustomerId() != null) {
+            customer = customerRepo.findById(req.getCustomerId())
+                    .orElseThrow(() -> new RuntimeException("Customer not found"));
+        }
+
+        // 🔒 CREDIT requires customer
+        if (req.getPaymentType() == PaymentType.CREDIT) {
+
+            if (customer == null) {
+
+                if (req.getCustomerName() == null || req.getCustomerName().isBlank()) {
+                    throw new RuntimeException("CREDIT bill requires customer name");
+                }
+
+                if (req.getCustomerMobile() == null || req.getCustomerMobile().isBlank()) {
+                    throw new RuntimeException("CREDIT bill requires customer mobile");
+                }
+
+                customer = customerService.createCustomer(
+                        req.getCustomerName().trim(),
+                        req.getCustomerMobile().trim(),
+                        req.getCustomerAddress()
+                );
+            }
+        }
+
+        BigDecimal subtotal = BigDecimal.ZERO;
+        for (BillItemRequest i : req.getItems()) {
+            subtotal = subtotal.add(i.getQuantity().multiply(i.getPrice()));
+        }
+
+        BigDecimal discount =
+                req.getDiscountAmount() != null ? req.getDiscountAmount() : BigDecimal.ZERO;
+
+        if (discount.signum() < 0 || discount.compareTo(subtotal) > 0) {
+            throw new RuntimeException("Invalid discount");
+        }
+
+        BigDecimal finalAmount = subtotal.subtract(discount);
+
+        BigDecimal amountPaid =
+                req.getAmountPaid() != null
+                        ? req.getAmountPaid()
+                        : defaultPaidAmount(req.getPaymentType(), finalAmount);
+
+        if (amountPaid.signum() < 0 || amountPaid.compareTo(finalAmount) > 0) {
+            throw new RuntimeException("Invalid paid amount");
+        }
+
+        BigDecimal dueAmount = finalAmount.subtract(amountPaid);
 
         Bill bill = new Bill();
         bill.setBillNumber(generateBillNumber());
         bill.setBillCode(generateBillCode());
-        bill.setPaymentType(request.getPaymentType());
+        bill.setPaymentType(req.getPaymentType());
+        bill.setCustomer(customer);
         bill.setCreatedBy(user);
-        bill.setTotalAmount(BigDecimal.ZERO);
+        bill.setSubtotal(subtotal);
+        bill.setDiscountAmount(discount);
+        bill.setTotalAmount(finalAmount);
 
-        if (request.getCustomerId() != null) {
-            Customer customer = customerRepo.findById(request.getCustomerId())
-                    .orElseThrow(() -> new RuntimeException("Customer not found"));
-            bill.setCustomer(customer);
-        }
+        billRepo.save(bill);
 
-        bill = billRepo.save(bill);
-
-        BigDecimal total = BigDecimal.ZERO;
-
-        for (BillItemRequest itemReq : request.getItems()) {
+        for (BillItemRequest itemReq : req.getItems()) {
 
             Item item = itemRepo.findById(itemReq.getItemId())
                     .orElseThrow(() -> new RuntimeException("Item not found"));
 
-            validationService.validateQuantity(
-                    item.getBaseUnit(),
-                    itemReq.getQuantity()
-            );
-
-            validationService.validatePrice(
-                    itemReq.getPrice(),
-                    item.getCostPrice()
-            );
+            validationService.validateQuantity(item.getBaseUnit(), itemReq.getQuantity());
+            validationService.validatePrice(itemReq.getPrice(), item.getCostPrice());
 
             Stock stock = stockRepo.findById(item.getId())
                     .orElseThrow(() -> new RuntimeException("Stock not found"));
 
-            BigDecimal available = stock.getQuantity();
-            BigDecimal requested = itemReq.getQuantity();
+            BigDecimal fulfilled =
+                    stock.getQuantity().min(itemReq.getQuantity());
 
-            BigDecimal fulfilled = available.compareTo(requested) >= 0
-                    ? requested
-                    : available;
-
-            BigDecimal pending = requested.subtract(fulfilled);
+            BigDecimal pending =
+                    itemReq.getQuantity().subtract(fulfilled);
 
             BillItem bi = new BillItem();
             bi.setBill(bill);
             bi.setItem(item);
-            bi.setQuantity(requested);
+            bi.setQuantity(itemReq.getQuantity());
             bi.setPrice(itemReq.getPrice());
-            bi.setAmount(itemReq.getPrice().multiply(requested));
+            bi.setAmount(itemReq.getPrice().multiply(itemReq.getQuantity()));
             bi.setFulfilledQty(fulfilled);
             bi.setPendingQty(pending);
 
-            if (pending.signum() == 0) {
-                bi.setFulfilmentStatus("FULL");
-            } else if (fulfilled.signum() == 0) {
-                bi.setFulfilmentStatus("PENDING");
-            } else {
-                bi.setFulfilmentStatus("PARTIAL");
-            }
+            bi.setFulfilmentStatus(
+                    pending.signum() == 0 ? "FULL"
+                            : fulfilled.signum() == 0 ? "PENDING"
+                            : "PARTIAL"
+            );
 
-            // ✅ CRITICAL: attach item to bill
             bill.getItems().add(bi);
-            // billItemRepo.save(bi);
 
             if (fulfilled.signum() > 0) {
                 stock.setQuantity(stock.getQuantity().subtract(fulfilled));
@@ -137,67 +185,156 @@ public class BillingService {
                 txn.setQuantity(fulfilled);
                 txn.setReferenceType(ReferenceType.BILL);
                 txn.setReferenceId(bill.getId());
-
                 stockTxnRepo.save(txn);
             }
-
-            total = total.add(itemReq.getPrice().multiply(requested));
         }
 
-        bill.setTotalAmount(total);
-        bill = billRepo.save(bill);
-
-        // CREDIT handling
-        if (bill.getPaymentType() == PaymentType.CREDIT) {
-
-            Customer customer = bill.getCustomer();
-            BigDecimal oldBalance = customer.getBalance();
-            BigDecimal newBalance = oldBalance.add(bill.getTotalAmount());
-
-            customer.setBalance(newBalance);
-            customerRepo.save(customer);
-
-            auditService.log(
-                    "CUSTOMER",
-                    customer.getId(),
-                    "CREDIT_OVERRIDE",
-                    oldBalance.toString(),
-                    newBalance.toString(),
-                    user
-            );
-
-            CustomerLedger ledger = new CustomerLedger();
-            ledger.setCustomer(customer);
-            ledger.setBill(bill);
-            ledger.setDebit(bill.getTotalAmount());
-
-            ledgerRepo.save(ledger);
+        if (bill.getPaymentType() == PaymentType.CREDIT && dueAmount.signum() > 0) {
+            CustomerLedger debit = new CustomerLedger();
+            debit.setCustomer(customer);
+            debit.setBill(bill);
+            debit.setEntryType(LedgerType.DEBIT);
+            debit.setAmount(dueAmount);
+            ledgerRepo.save(debit);
         }
 
-        // 📲 WhatsApp Notifications
-        if (bill.getCustomer() != null) {
+        auditService.log(
+                "BILL",
+                bill.getId(),
+                "CREATE",
+                null,
+                finalAmount.toString(),
+                user
+        );
 
+        if (customer != null && customer.getMobile() != null) {
             notificationService.sendWhatsApp(
-                    bill.getCustomer().getMobile(),
+                    customer.getMobile(),
                     WhatsAppTemplates.billCreated(bill)
             );
-
-            if (bill.getItems().stream()
-                    .anyMatch(i -> i.getPendingQty().signum() > 0)) {
-
-                notificationService.sendWhatsApp(
-                        bill.getCustomer().getMobile(),
-                        WhatsAppTemplates.pendingItems(bill)
-                );
-            }
         }
 
         return bill;
     }
 
+    /* =====================================================
+       READ — BILL DETAILS
+       ===================================================== */
+    public BillResponse getBillById(UUID billId) {
+
+        Bill bill = billRepo.findById(billId)
+                .orElseThrow(() -> new RuntimeException("Bill not found"));
+
+        BigDecimal due = ledgerRepo.getDueForBill(billId);
+        BigDecimal paid = bill.getTotalAmount().subtract(due);
+
+        BillResponse res = new BillResponse();
+        res.setBillId(bill.getId());
+        res.setBillNumber(bill.getBillNumber());
+        res.setBillCode(bill.getBillCode());
+        res.setBillDate(bill.getCreatedAt());
+        res.setPaymentType(bill.getPaymentType().name());
+
+        if (bill.getCustomer() != null) {
+            res.setCustomerName(bill.getCustomer().getName());
+            res.setCustomerMobile(bill.getCustomer().getMobile());
+            res.setCustomerAddress(bill.getCustomer().getAddress());
+            res.setCustomerCode(bill.getCustomer().getCustomerCode());
+        }
+
+        res.setSubtotal(bill.getSubtotal());
+        res.setDiscountAmount(bill.getDiscountAmount());
+        res.setTotalAmount(bill.getTotalAmount());
+        res.setAmountPaid(paid);
+        res.setDueAmount(due);
+
+        return res;
+    }
+
+    /* =====================================================
+       PRINT BILL
+       ===================================================== */
+    public BillPrintResponse getBillForPrint(UUID billId) {
+
+        Bill bill = billRepo.findById(billId)
+                .orElseThrow(() -> new RuntimeException("Bill not found"));
+
+        BigDecimal due = ledgerRepo.getDueForBill(billId);
+        BigDecimal paid = bill.getTotalAmount().subtract(due);
+
+        return new BillPrintResponse(
+                bill.getBillNumber(),
+                bill.getBillCode(),
+                bill.getCreatedAt(),
+                bill.getPaymentType().name(),
+                bill.getCustomer() != null ? bill.getCustomer().getName() : null,
+                bill.getCustomer() != null ? bill.getCustomer().getMobile() : null,
+                bill.getCustomer() != null ? bill.getCustomer().getAddress() : null,
+                bill.getItems().stream()
+                        .map(i -> new BillPrintResponse.Item(
+                                i.getItem().getName(),
+                                i.getQuantity(),
+                                i.getItem().getBaseUnit().name(),
+                                i.getPrice(),
+                                i.getAmount()
+                        ))
+                        .toList(),
+                bill.getSubtotal(),
+                bill.getDiscountAmount(),
+                bill.getTotalAmount(),
+                paid,
+                due
+        );
+    }
+
+    /* =====================================================
+       SETTLE BILL
+       ===================================================== */
+    @Transactional
+    public void settleBill(UUID billId, SettleBillRequest req, User user) {
+
+        authService.requireBillingOrOwner(user);
+
+        Bill bill = billRepo.findById(billId)
+                .orElseThrow(() -> new RuntimeException("Bill not found"));
+
+        BigDecimal due = ledgerRepo.getDueForBill(billId);
+
+        BigDecimal paid = req.getAmountPaid() != null ? req.getAmountPaid() : BigDecimal.ZERO;
+        BigDecimal adjustment = req.getAdjustment() != null ? req.getAdjustment() : BigDecimal.ZERO;
+
+        if (paid.add(adjustment).compareTo(due) > 0) {
+            throw new RuntimeException("Settlement exceeds due");
+        }
+
+        if (paid.signum() > 0) {
+            CustomerLedger credit = new CustomerLedger();
+            credit.setCustomer(bill.getCustomer());
+            credit.setBill(bill);
+            credit.setEntryType(LedgerType.CREDIT);
+            credit.setAmount(paid);
+            ledgerRepo.save(credit);
+        }
+
+        if (adjustment.signum() > 0) {
+            CustomerLedger waive = new CustomerLedger();
+            waive.setCustomer(bill.getCustomer());
+            waive.setBill(bill);
+            waive.setEntryType(LedgerType.ADJUSTMENT);
+            waive.setAmount(adjustment);
+            ledgerRepo.save(waive);
+        }
+    }
+
+    /* =====================================================
+       HELPERS
+       ===================================================== */
+    private BigDecimal defaultPaidAmount(PaymentType type, BigDecimal total) {
+        return type == PaymentType.CREDIT ? BigDecimal.ZERO : total;
+    }
+
     private String generateBillNumber() {
-        long next = billRepo.count() + 1;
-        return "BILL-" + String.format("%04d", next);
+        return "BILL-" + String.format("%04d", billRepo.count() + 1);
     }
 
     private String generateBillCode() {

@@ -1,7 +1,9 @@
 package com.store.app.controller;
 
 import com.store.app.dto.ApiResponse;
+import com.store.app.dto.LowStockItemResponse;
 import com.store.app.dto.StockAdjustmentRequest;
+import com.store.app.dto.StockSummaryDto;
 import com.store.app.entity.Stock;
 import com.store.app.entity.User;
 import com.store.app.service.AuthService;
@@ -21,7 +23,9 @@ public class StockController {
     private final StockService stockService;
     private final AuthService authService;
 
-    // 🔧 Manual stock adjustment (OWNER)
+    /* =====================================================
+       🔧 MANUAL STOCK ADJUSTMENT (OWNER)
+       ===================================================== */
     @PostMapping("/adjust")
     public ResponseEntity<ApiResponse<String>> adjustStock(
             @RequestBody StockAdjustmentRequest request,
@@ -39,26 +43,54 @@ public class StockController {
         );
     }
 
-    // 📦 Stock summary (all items)
+    /* =====================================================
+       📦 STOCK SUMMARY (DTO — API SAFE)
+       ===================================================== */
+
+    /**
+     * ✅ SAFE FOR FRONTEND
+     * Uses DTO projection — avoids LazyInitializationException
+     */
     @GetMapping("/summary")
-    public ResponseEntity<ApiResponse<List<Stock>>> getStockSummary() {
+    public ResponseEntity<ApiResponse<List<StockSummaryDto>>> getStockSummary() {
         return ResponseEntity.ok(
                 new ApiResponse<>(
                         true,
-                        stockService.getStockSummary(),
+                        stockService.getStockSummaryDto(),
                         "Stock summary fetched"
                 )
         );
     }
 
-    // 🟡 Low stock items
+    /* =====================================================
+       🟡 LOW STOCK ITEMS (DTO — API SAFE)
+       ===================================================== */
     @GetMapping("/low-stock")
-    public ResponseEntity<ApiResponse<List<Stock>>> getLowStockItems() {
+    public ResponseEntity<ApiResponse<List<LowStockItemResponse>>> getLowStockItems() {
         return ResponseEntity.ok(
                 new ApiResponse<>(
                         true,
                         stockService.getLowStockItems(),
                         "Low stock items fetched"
+                )
+        );
+    }
+
+    /* =====================================================
+       ⚠️ INTERNAL / ADMIN — ENTITY ACCESS (OPTIONAL)
+       ===================================================== */
+
+    /**
+     * ⚠️ ENTITY ENDPOINT — NOT FOR FRONTEND
+     * Keep for admin / internal debugging only
+     */
+    @GetMapping("/summary-raw")
+    public ResponseEntity<ApiResponse<List<Stock>>> getStockSummaryRaw() {
+        return ResponseEntity.ok(
+                new ApiResponse<>(
+                        true,
+                        stockService.getStockSummary(),
+                        "Raw stock summary fetched"
                 )
         );
     }

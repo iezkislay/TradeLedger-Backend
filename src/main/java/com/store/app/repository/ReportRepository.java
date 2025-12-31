@@ -4,6 +4,7 @@ import com.store.app.dto.*;
 import com.store.app.entity.Bill;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.Repository;
+import org.springframework.data.repository.query.Param;
 
 import java.time.LocalDate;
 import java.util.List;
@@ -24,7 +25,9 @@ public interface ReportRepository extends Repository<Bill, UUID> {
         WHERE DATE(created_at) = :date
         GROUP BY DATE(created_at)
         """, nativeQuery = true)
-    List<DailySalesReportRow> dailySales(LocalDate date);
+    List<DailySalesReportRow> dailySales(
+            @Param("date") LocalDate date
+    );
 
     @Query(value = """
         SELECT
@@ -50,7 +53,10 @@ public interface ReportRepository extends Repository<Bill, UUID> {
         GROUP BY i.id, i.name
         ORDER BY totalAmount DESC
         """, nativeQuery = true)
-    List<ItemSalesRow> itemSales(LocalDate from, LocalDate to);
+    List<ItemSalesRow> itemSales(
+            @Param("from") LocalDate from,
+            @Param("to") LocalDate to
+    );
 
     // =========================
     // 🆕 PHASE-2 REPORTS (FIXED)
@@ -70,7 +76,10 @@ public interface ReportRepository extends Repository<Bill, UUID> {
         GROUP BY i.name, i.category
         ORDER BY 4 DESC
         """, nativeQuery = true)
-    List<Object[]> itemWiseSalesRaw(LocalDate from, LocalDate to);
+    List<Object[]> itemWiseSalesRaw(
+            @Param("from") LocalDate from,
+            @Param("to") LocalDate to
+    );
 
     // 2️⃣ Category-wise sales
     @Query(value = """
@@ -85,7 +94,10 @@ public interface ReportRepository extends Repository<Bill, UUID> {
         GROUP BY i.category
         ORDER BY 3 DESC
         """, nativeQuery = true)
-    List<Object[]> categoryWiseSalesRaw(LocalDate from, LocalDate to);
+    List<Object[]> categoryWiseSalesRaw(
+            @Param("from") LocalDate from,
+            @Param("to") LocalDate to
+    );
 
     // 3️⃣ Daily sales range
     @Query(value = """
@@ -97,5 +109,8 @@ public interface ReportRepository extends Repository<Bill, UUID> {
         GROUP BY DATE(b.created_at)
         ORDER BY 1
         """, nativeQuery = true)
-    List<Object[]> dailySalesRangeRaw(LocalDate from, LocalDate to);
+    List<Object[]> dailySalesRangeRaw(
+            @Param("from") LocalDate from,
+            @Param("to") LocalDate to
+    );
 }

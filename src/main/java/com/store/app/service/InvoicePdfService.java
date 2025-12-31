@@ -12,7 +12,6 @@ import org.springframework.stereotype.Service;
 
 import java.awt.*;
 import java.io.ByteArrayOutputStream;
-import java.math.BigDecimal;
 
 @Service
 public class InvoicePdfService {
