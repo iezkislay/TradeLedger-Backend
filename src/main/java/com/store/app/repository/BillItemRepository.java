@@ -18,6 +18,14 @@ public interface BillItemRepository extends JpaRepository<BillItem, UUID> {
 
     /**
      * ===============================
+     * READ — BILL ITEMS (REQUIRED)
+     * ===============================
+     * Fetch all items for a bill (read-only)
+     */
+    List<BillItem> findByBillId(UUID billId);
+
+    /**
+     * ===============================
      * DASHBOARD ANALYTICS (ADD ONLY)
      * ===============================
      * Top selling items by quantity (date range)

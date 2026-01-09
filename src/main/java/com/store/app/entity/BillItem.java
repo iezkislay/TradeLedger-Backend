@@ -28,8 +28,8 @@ public class BillItem {
     private Item item;
 
     /**
-     * Total quantity sold (financial commitment)
-     * quantity = fulfilledQty + pendingQty
+     * ORIGINAL quantity sold (never changes)
+     * quantity = fulfilledQty + pendingQty + returnedQty
      */
     @Column(nullable = false)
     private BigDecimal quantity;
@@ -41,10 +41,17 @@ public class BillItem {
     private BigDecimal price;
 
     /**
-     * Total amount = quantity × price
+     * Total amount = quantity × price (IMMUTABLE)
      */
     @Column(nullable = false)
     private BigDecimal amount;
+
+    /**
+     * 🆕 Quantity returned by customer
+     * (from DELIVERED or PENDING)
+     */
+    @Column(name = "returned_quantity", nullable = false)
+    private BigDecimal returnedQty = BigDecimal.ZERO;
 
     /**
      * Quantity physically delivered to customer
@@ -59,8 +66,21 @@ public class BillItem {
     private BigDecimal pendingQty = BigDecimal.ZERO;
 
     /**
-     * FULL | PARTIAL | PENDING
+     * FULL | PARTIAL | PENDING | RETURNED
      */
     @Column(nullable = false)
     private String fulfilmentStatus;
+
+    /* =========================
+       DERIVED (NOT STORED)
+       ========================= */
+
+    /**
+     * Net quantity after returns
+     * netQuantity = quantity − returnedQty
+     */
+    @Transient
+    public BigDecimal getNetQuantity() {
+        return quantity.subtract(returnedQty);
+    }
 }

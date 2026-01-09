@@ -24,16 +24,12 @@ public class Stock {
     private UUID itemId;
 
     /**
-     * Read-only relationship for JPQL joins
-     * Does NOT affect inserts / updates
+     * 🔥 CRITICAL FIX
+     * Shared primary key mapping
      */
+    @MapsId
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(
-            name = "item_id",
-            referencedColumnName = "id",
-            insertable = false,
-            updatable = false
-    )
+    @JoinColumn(name = "item_id")
     private Item item;
 
     @Column(nullable = false)

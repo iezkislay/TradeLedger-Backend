@@ -1,151 +1,281 @@
 package com.store.app.service;
 
-import com.store.app.dto.PartialReturnRequest;
+import com.store.app.dto.ReturnItemRequest;
 import com.store.app.entity.*;
 import com.store.app.enums.LedgerType;
-import com.store.app.enums.PaymentType;
 import com.store.app.enums.ReferenceType;
-import com.store.app.enums.ReturnType;
+import com.store.app.enums.ReturnSource;
 import com.store.app.enums.StockTxnType;
 import com.store.app.repository.*;
 import jakarta.transaction.Transactional;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.time.LocalDateTime;
+import java.util.List;
+import java.util.UUID;
 
 @Service
 public class ReturnService {
 
     private final BillItemRepository billItemRepo;
+    private final ReturnItemRepository returnItemRepo;
+    private final ReturnNoteRepository returnNoteRepo;
+    private final CustomerLedgerRepository ledgerRepo;
     private final StockRepository stockRepo;
     private final StockTransactionRepository stockTxnRepo;
-    private final CustomerLedgerRepository ledgerRepo;
-    private final AuthService authService;
-    private final AuditService auditService;
+    private final RefundService refundService;
 
     public ReturnService(
             BillItemRepository billItemRepo,
+            ReturnItemRepository returnItemRepo,
+            ReturnNoteRepository returnNoteRepo,
+            CustomerLedgerRepository ledgerRepo,
             StockRepository stockRepo,
             StockTransactionRepository stockTxnRepo,
-            CustomerLedgerRepository ledgerRepo,
-            AuthService authService,
-            AuditService auditService
+            RefundService refundService
     ) {
         this.billItemRepo = billItemRepo;
+        this.returnItemRepo = returnItemRepo;
+        this.returnNoteRepo = returnNoteRepo;
+        this.ledgerRepo = ledgerRepo;
         this.stockRepo = stockRepo;
         this.stockTxnRepo = stockTxnRepo;
-        this.ledgerRepo = ledgerRepo;
-        this.authService = authService;
-        this.auditService = auditService;
+        this.refundService = refundService;
     }
 
-    /**
-     * 🔁 Partial Return (DELIVERED or PENDING)
-     */
+    /* =====================================================
+       STEP 1 — CREATE RETURN NOTE (USER-INTENT SAFE)
+       ===================================================== */
     @Transactional
-    public void partialReturn(PartialReturnRequest req, User user) {
+    public ReturnNote createReturnNote(
+            List<ReturnItemRequest> items,
+            User user
+    ) {
 
-        // 🔒 RBAC
-        authService.requireBillingOrOwner(user);
-
-        BillItem bi = billItemRepo.findById(req.getBillItemId())
-                .orElseThrow(() -> new RuntimeException("Bill item not found"));
-
-        BigDecimal qty = req.getQuantity();
-        if (qty == null || qty.signum() <= 0) {
-            throw new RuntimeException("Return quantity must be greater than zero");
+        if (items == null || items.isEmpty()) {
+            throw new RuntimeException("No return items provided");
         }
 
-        Bill bill = bi.getBill();
+        Bill bill = null;
+        BigDecimal returnedGross = BigDecimal.ZERO;
 
-        // =========================
-        // RETURN FROM DELIVERED
-        // =========================
-        if (req.getReturnType() == ReturnType.DELIVERED) {
+        ReturnNote note = new ReturnNote();
+        note.setCreatedBy(user);
 
-            if (qty.compareTo(bi.getFulfilledQty()) > 0) {
-                throw new RuntimeException("Return exceeds delivered quantity");
+        for (ReturnItemRequest req : items) {
+
+            if (req.getReturnSource() == null) {
+                throw new RuntimeException("Return source is required (DELIVERED / PENDING)");
             }
 
-            // 📦 Stock IN
-            Stock stock = stockRepo.findById(bi.getItem().getId())
-                    .orElseThrow(() -> new RuntimeException("Stock not found"));
+            BillItem billItem = billItemRepo.findById(req.getBillItemId())
+                    .orElseThrow(() -> new RuntimeException("Bill item not found"));
 
-            stock.setQuantity(stock.getQuantity().add(qty));
-            stockRepo.save(stock);
-
-            // 📊 Stock transaction
-            StockTransaction txn = new StockTransaction();
-            txn.setItem(bi.getItem());
-            txn.setTransactionType(StockTxnType.IN);
-            txn.setQuantity(qty);
-            txn.setReferenceType(ReferenceType.RETURN);
-            txn.setReferenceId(bill.getId());
-            stockTxnRepo.save(txn);
-
-            bi.setFulfilledQty(bi.getFulfilledQty().subtract(qty));
-        }
-
-        // =========================
-        // CANCEL FROM PENDING
-        // =========================
-        else if (req.getReturnType() == ReturnType.PENDING) {
-
-            if (qty.compareTo(bi.getPendingQty()) > 0) {
-                throw new RuntimeException("Return exceeds pending quantity");
+            if (bill == null) {
+                bill = billItem.getBill();
+                note.setBill(bill);
+                returnNoteRepo.save(note);
+            } else if (!bill.getId().equals(billItem.getBill().getId())) {
+                throw new RuntimeException("All return items must belong to the same bill");
             }
 
-            bi.setPendingQty(bi.getPendingQty().subtract(qty));
+            BigDecimal requestedQty = req.getReturnedQuantity();
+            if (requestedQty == null || requestedQty.signum() <= 0) {
+                throw new RuntimeException("Returned quantity must be positive");
+            }
+
+            BigDecimal deliveredReturn = BigDecimal.ZERO;
+            BigDecimal pendingReturn = BigDecimal.ZERO;
+
+            if (req.getReturnSource() == ReturnSource.DELIVERED) {
+
+                BigDecimal alreadyReturnedDelivered =
+                        returnItemRepo.getTotalReturnedDeliveredQtyForBillItem(billItem.getId());
+
+                BigDecimal maxAllowed =
+                        billItem.getFulfilledQty().subtract(alreadyReturnedDelivered);
+
+                if (requestedQty.compareTo(maxAllowed) > 0) {
+                    throw new RuntimeException("Delivered return exceeds fulfilled quantity");
+                }
+
+                deliveredReturn = requestedQty;
+
+            } else {
+
+                BigDecimal alreadyReturnedPending =
+                        returnItemRepo.getTotalReturnedPendingQtyForBillItem(billItem.getId());
+
+                BigDecimal maxAllowed =
+                        billItem.getPendingQty().subtract(alreadyReturnedPending);
+
+                if (requestedQty.compareTo(maxAllowed) > 0) {
+                    throw new RuntimeException("Pending return exceeds pending quantity");
+                }
+
+                pendingReturn = requestedQty;
+            }
+
+            BigDecimal lineAmount =
+                    requestedQty.multiply(billItem.getPrice());
+
+            returnedGross = returnedGross.add(lineAmount);
+
+            if (deliveredReturn.signum() > 0) {
+
+                Stock stock = stockRepo.findById(billItem.getItem().getId())
+                        .orElseThrow(() -> new RuntimeException("Stock not found"));
+
+                stock.setQuantity(stock.getQuantity().add(deliveredReturn));
+                stockRepo.save(stock);
+
+                StockTransaction txn = new StockTransaction();
+                txn.setItem(billItem.getItem());
+                txn.setTransactionType(StockTxnType.IN);
+                txn.setQuantity(deliveredReturn);
+                txn.setReferenceType(ReferenceType.RETURN);
+                txn.setReferenceId(note.getId());
+                stockTxnRepo.save(txn);
+            }
+
+            ReturnItem ri = new ReturnItem();
+            ri.setReturnNote(note);
+            ri.setBill(bill);
+            ri.setBillItem(billItem);
+            ri.setItem(billItem.getItem());
+            ri.setReturnedDeliveredQty(deliveredReturn);
+            ri.setReturnedPendingQty(pendingReturn);
+            ri.setPrice(billItem.getPrice());
+
+            returnItemRepo.save(ri);
         }
 
-        else {
-            throw new RuntimeException("Invalid return type");
+        BigDecimal billSubtotal = bill.getSubtotal();
+        if (billSubtotal == null || billSubtotal.signum() <= 0) {
+            throw new RuntimeException("Invalid bill subtotal");
         }
 
-        // =========================
-        // COMMON UPDATES
-        // =========================
-        bi.setQuantity(bi.getQuantity().subtract(qty));
+        BigDecimal billDiscount = bill.getDiscountAmount();
 
-        if (bi.getPendingQty().signum() == 0 && bi.getFulfilledQty().signum() > 0) {
-            bi.setFulfilmentStatus("FULL");
-        } else if (bi.getFulfilledQty().signum() == 0) {
-            bi.setFulfilmentStatus("PENDING");
+        BigDecimal returnPercentage =
+                returnedGross.divide(billSubtotal, 6, RoundingMode.HALF_UP);
+
+        BigDecimal clawedDiscount =
+                billDiscount.multiply(returnPercentage)
+                        .setScale(2, RoundingMode.HALF_UP);
+
+        BigDecimal netReturn =
+                returnedGross.subtract(clawedDiscount);
+
+        if (netReturn.signum() <= 0) {
+            throw new RuntimeException("Net return must be positive");
+        }
+
+        note.setReturnedGrossAmount(returnedGross);
+        note.setClawedDiscountAmount(clawedDiscount);
+        note.setNetReturnAmount(netReturn);
+
+        returnNoteRepo.save(note);
+        return note;
+    }
+
+    /* =====================================================
+       STEP 2 — FINALIZE RETURN (RESIDUAL SAFE & IDEMPOTENT)
+       ===================================================== */
+    @Transactional
+    public void finalizeReturn(UUID returnNoteId, User user) {
+
+        ReturnNote note = returnNoteRepo.findById(returnNoteId)
+                .orElseThrow(() -> new RuntimeException("Return note not found"));
+
+        if (note.isFinalized()) {
+            return;
+        }
+
+        Bill bill = note.getBill();
+
+        // ===============================
+        // 🔒 BILL CAP (SOURCE OF TRUTH)
+        // ===============================
+        BigDecimal billCap = bill.getTotalAmount();
+
+        BigDecimal alreadyFinalized =
+                returnNoteRepo.sumFinalizedNetReturnByBill(bill.getId());
+
+        if (alreadyFinalized == null) {
+            alreadyFinalized = BigDecimal.ZERO;
+        }
+
+        BigDecimal remainingCap =
+                billCap.subtract(alreadyFinalized);
+
+        // ===============================
+        // 🧮 RESIDUAL ROUNDING ADJUSTMENT
+        // ===============================
+        BigDecimal tolerance = new BigDecimal("1.00");
+
+        BigDecimal diff =
+                note.getNetReturnAmount().subtract(remainingCap).abs();
+
+        if (diff.compareTo(tolerance) <= 0) {
+
+            note.setNetReturnAmount(remainingCap);
+
+            BigDecimal adjustedClawback =
+                    note.getReturnedGrossAmount().subtract(remainingCap);
+
+            note.setClawedDiscountAmount(
+                    adjustedClawback.max(BigDecimal.ZERO)
+            );
+
+            returnNoteRepo.save(note);
+
+        } else if (note.getNetReturnAmount().compareTo(remainingCap) > 0) {
+            throw new RuntimeException(
+                    "Return exceeds remaining bill value. Max allowed: ₹" + remainingCap
+            );
+        }
+
+        BigDecimal finalNet = note.getNetReturnAmount();
+        Customer customer = bill.getCustomer();
+
+        if (customer == null) {
+
+            refundService.createRefundUnchecked(
+                    bill,
+                    finalNet,
+                    "Refund against finalized return",
+                    user
+            );
+
+
         } else {
-            bi.setFulfilmentStatus("PARTIAL");
+
+            BigDecimal due = ledgerRepo.getDueForBill(bill.getId());
+            if (due == null) due = BigDecimal.ZERO;
+
+            BigDecimal creditToDue = finalNet.min(due);
+
+            if (creditToDue.signum() > 0) {
+                CustomerLedger credit = new CustomerLedger();
+                credit.setCustomer(customer);
+                credit.setBill(bill);
+                credit.setEntryType(LedgerType.CREDIT);
+                credit.setAmount(creditToDue);
+                ledgerRepo.save(credit);
+            }
+
+            BigDecimal refundAmount = finalNet.subtract(creditToDue);
+
+            if (refundAmount.signum() > 0) {
+                refundService.refundFromReturnNote(bill, refundAmount, user);
+            }
         }
 
-        billItemRepo.save(bi);
-
-        // =========================
-        // LEDGER (CREDIT → RETURN)
-        // =========================
-        if (bill.getPaymentType() == PaymentType.CREDIT &&
-                bill.getCustomer() != null) {
-
-            BigDecimal refundAmount = bi.getPrice().multiply(qty);
-
-            CustomerLedger ledger = new CustomerLedger();
-            ledger.setCustomer(bill.getCustomer());
-            ledger.setBill(bill);
-            ledger.setEntryType(LedgerType.CREDIT);
-            ledger.setAmount(refundAmount);
-
-            ledgerRepo.save(ledger);
-        }
-
-        // =========================
-        // AUDIT LOG
-        // =========================
-        auditService.log(
-                "BILL",
-                bill.getId(),
-                "PARTIAL_RETURN",
-                null,
-                "Type=" + req.getReturnType() +
-                        ", Qty=" + qty +
-                        ", Reason=" + req.getReason(),
-                user
-        );
+        note.setFinalized(true);
+        note.setFinalizedAt(LocalDateTime.now());
+        returnNoteRepo.save(note);
     }
 }

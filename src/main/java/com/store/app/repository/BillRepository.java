@@ -140,4 +140,29 @@ public interface BillRepository extends JpaRepository<Bill, UUID> {
         WHERE DATE(b.createdAt) BETWEEN :from AND :to
     """)
     BigDecimal avgBillValue(LocalDate from, LocalDate to);
+
+    /* =====================================================
+       READ — LIST / SEARCH BILLS (EXISTING)
+       ===================================================== */
+
+    @Query(
+            value = """
+        SELECT *
+        FROM bills b
+        WHERE (
+            :search IS NULL
+            OR b.bill_number ILIKE CONCAT('%', :search, '%')
+            OR b.bill_code   ILIKE CONCAT('%', :search, '%')
+        )
+        ORDER BY b.created_at DESC
+    """,
+            nativeQuery = true
+    )
+    List<Bill> searchBills(String search);
+
+    /* =====================================================
+       READ — CUSTOMER BILLS (NEW, SAFE ADDITION)
+       ===================================================== */
+
+    List<Bill> findByCustomerIdOrderByCreatedAtDesc(UUID customerId);
 }

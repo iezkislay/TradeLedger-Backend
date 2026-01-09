@@ -34,10 +34,6 @@ public class StockService {
        📦 STOCK SUMMARY (ENTITY — INTERNAL USE)
        ===================================================== */
 
-    /**
-     * ⚠️ INTERNAL USE ONLY
-     * Returns entities — NOT SAFE for controller JSON
-     */
     public List<Stock> getStockSummary() {
         return stockRepo.findAll();
     }
@@ -46,10 +42,6 @@ public class StockService {
        🟢 STOCK SUMMARY (DTO — API SAFE)
        ===================================================== */
 
-    /**
-     * ✅ SAFE FOR CONTROLLER
-     * Uses DTO projection → no lazy loading issues
-     */
     public List<StockSummaryDto> getStockSummaryDto() {
         return stockRepo.fetchStockSummary();
     }
@@ -59,7 +51,6 @@ public class StockService {
        ===================================================== */
 
     public List<LowStockItemResponse> getLowStockItems() {
-
         return stockRepo.findLowStockRaw().stream()
                 .map(r -> {
                     LowStockItemResponse dto = new LowStockItemResponse();
@@ -73,7 +64,7 @@ public class StockService {
     }
 
     /* =====================================================
-       🔧 MANUAL STOCK ADJUSTMENT (OWNER ONLY)
+       🔧 MANUAL STOCK ADJUSTMENT (EXISTING — STRICT)
        ===================================================== */
 
     @Transactional
@@ -102,11 +93,71 @@ public class StockService {
         stock.setQuantity(newQty);
         stockRepo.save(stock);
 
-        // 🧾 STOCK ADJUST AUDIT
         auditService.log(
                 "STOCK",
                 item.getId(),
                 "STOCK_ADJUST",
+                oldQty.toString(),
+                newQty.toString(),
+                user
+        );
+
+        StockTransaction txn = new StockTransaction();
+        txn.setItem(item);
+        txn.setTransactionType(StockTxnType.ADJUST);
+        txn.setQuantity(request.getQuantity().abs());
+        txn.setReferenceType(ReferenceType.MANUAL);
+        txn.setReferenceId(null);
+
+        stockTxnRepo.save(txn);
+    }
+
+    /* =====================================================
+       🆕 SAFE STOCK ADJUSTMENT (AUTO-CREATE STOCK)
+       ===================================================== */
+
+    @Transactional
+    public void adjustStockSafe(
+            UUID itemId,
+            StockAdjustmentRequest request,
+            User user
+    ) {
+
+        authService.requireBillingOrOwner(user);
+
+        if (request.getQuantity() == null ||
+                request.getQuantity().compareTo(BigDecimal.ZERO) == 0) {
+            throw new RuntimeException("Adjustment quantity cannot be zero");
+        }
+
+        Item item = itemRepo.findById(itemId)
+                .orElseThrow(() -> new RuntimeException("Item not found"));
+
+        Stock stock = stockRepo.findById(itemId).orElse(null);
+
+        // ✅ CREATE STOCK IF MISSING (SAFE WAY)
+        if (stock == null) {
+            stock = new Stock();
+            stock.setItem(item);   // 🔥 MUST be set FIRST
+            stock.setItem(item);
+            stock.setQuantity(BigDecimal.ZERO);
+            stockRepo.save(stock);
+        }
+
+        BigDecimal oldQty = stock.getQuantity();
+        BigDecimal newQty = oldQty.add(request.getQuantity());
+
+        if (newQty.compareTo(BigDecimal.ZERO) < 0) {
+            throw new RuntimeException("Stock cannot go negative");
+        }
+
+        stock.setQuantity(newQty);
+        stockRepo.save(stock);
+
+        auditService.log(
+                "STOCK",
+                item.getId(),
+                "STOCK_ADJUST_SAFE",
                 oldQty.toString(),
                 newQty.toString(),
                 user

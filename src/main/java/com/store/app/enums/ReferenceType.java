@@ -3,5 +3,8 @@ package com.store.app.enums;
 public enum ReferenceType {
     BILL,
     RETURN,
-    MANUAL
+    MANUAL,
+    PAYMENT,
+    REFUND,
+    BILL_OVERRIDE
 }

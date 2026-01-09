@@ -26,20 +26,67 @@ public interface CustomerLedgerRepository
        ===================================================== */
 
     @Query("""
-        SELECT COALESCE(SUM(
-            CASE
-                WHEN l.entryType = com.store.app.enums.LedgerType.DEBIT THEN l.amount
-                WHEN l.entryType IN (
-                    com.store.app.enums.LedgerType.CREDIT,
-                    com.store.app.enums.LedgerType.ADJUSTMENT
-                ) THEN -l.amount
-                ELSE 0
-            END
-        ), 0)
+    SELECT COALESCE(SUM(
+        CASE
+            WHEN l.entryType = com.store.app.enums.LedgerType.DEBIT THEN l.amount
+            WHEN l.entryType IN (
+                com.store.app.enums.LedgerType.CREDIT,
+                com.store.app.enums.LedgerType.RETURN_CREDIT,
+                com.store.app.enums.LedgerType.ADJUSTMENT
+            ) THEN -l.amount
+            ELSE 0
+        END
+    ), 0)
+    FROM CustomerLedger l
+    WHERE l.bill.id = :billId
+""")
+    BigDecimal getDueForBill(@Param("billId") UUID billId);
+
+    /* =====================================================
+       🆕 CURRENT LEGALLY RECOVERABLE DUE (ADD ONLY)
+       ===================================================== */
+
+    @Query("""
+        SELECT
+            COALESCE(
+                SUM(CASE
+                        WHEN l.entryType = com.store.app.enums.LedgerType.DEBIT
+                        THEN l.amount
+                        ELSE 0
+                END), 0
+            )
+            -
+            COALESCE(
+                SUM(CASE
+                        WHEN l.entryType = com.store.app.enums.LedgerType.CREDIT
+                        THEN l.amount
+                        ELSE 0
+                END), 0
+            )
+            -
+            COALESCE(
+                SUM(CASE
+                        WHEN l.entryType = com.store.app.enums.LedgerType.RETURN_CREDIT
+                        THEN l.amount
+                        ELSE 0
+                END), 0
+            )
         FROM CustomerLedger l
         WHERE l.bill.id = :billId
     """)
-    BigDecimal getDueForBill(@Param("billId") UUID billId);
+    BigDecimal getCurrentDue(@Param("billId") UUID billId);
+
+    /* =====================================================
+       🆕 PURE CASH PAID — BILL LEVEL (ADD ONLY)
+       ===================================================== */
+
+    @Query("""
+        SELECT COALESCE(SUM(l.amount), 0)
+        FROM CustomerLedger l
+        WHERE l.bill.id = :billId
+          AND l.entryType = com.store.app.enums.LedgerType.CREDIT
+    """)
+    BigDecimal getTotalPaidForBill(@Param("billId") UUID billId);
 
     /* =====================================================
        PENDING BILLS
@@ -55,6 +102,7 @@ public interface CustomerLedgerRepository
                 CASE
                     WHEN l.entryType IN (
                         com.store.app.enums.LedgerType.CREDIT,
+                        com.store.app.enums.LedgerType.RETURN_CREDIT,
                         com.store.app.enums.LedgerType.ADJUSTMENT
                     ) THEN l.amount
                     ELSE 0
@@ -70,6 +118,7 @@ public interface CustomerLedgerRepository
                 CASE
                     WHEN l.entryType IN (
                         com.store.app.enums.LedgerType.CREDIT,
+                        com.store.app.enums.LedgerType.RETURN_CREDIT,
                         com.store.app.enums.LedgerType.ADJUSTMENT
                     ) THEN l.amount
                     ELSE 0
@@ -103,7 +152,7 @@ public interface CustomerLedgerRepository
         SELECT COALESCE(SUM(
             CASE
                 WHEN l.entryType = 'DEBIT' THEN l.amount
-                WHEN l.entryType IN ('CREDIT', 'ADJUSTMENT') THEN -l.amount
+                WHEN l.entryType IN ('CREDIT', 'RETURN_CREDIT', 'ADJUSTMENT') THEN -l.amount
                 ELSE 0
             END
         ), 0)
@@ -120,6 +169,7 @@ public interface CustomerLedgerRepository
             CASE
                 WHEN l.entryType = com.store.app.enums.LedgerType.DEBIT THEN l.amount
                 WHEN l.entryType = com.store.app.enums.LedgerType.CREDIT THEN -l.amount
+                WHEN l.entryType = com.store.app.enums.LedgerType.RETURN_CREDIT THEN -l.amount
                 WHEN l.entryType = com.store.app.enums.LedgerType.ADJUSTMENT THEN -l.amount
                 ELSE 0
             END
@@ -157,6 +207,7 @@ public interface CustomerLedgerRepository
                     CASE
                         WHEN l.entryType = 'CREDIT' THEN l.amount
                         WHEN l.entryType = 'DEBIT' THEN -l.amount
+                        WHEN l.entryType = 'RETURN_CREDIT' THEN -l.amount
                         WHEN l.entryType = 'ADJUSTMENT' THEN -l.amount
                         ELSE 0
                     END
@@ -175,12 +226,13 @@ public interface CustomerLedgerRepository
        ===================================================== */
 
     @Query("""
-        SELECT 
+        SELECT
             cl.customer.id,
             COALESCE(SUM(
-                CASE 
+                CASE
                     WHEN cl.entryType = 'DEBIT' THEN cl.amount
                     WHEN cl.entryType = 'CREDIT' THEN -cl.amount
+                    WHEN cl.entryType = 'RETURN_CREDIT' THEN -cl.amount
                     WHEN cl.entryType = 'ADJUST' THEN -cl.amount
                     ELSE 0
                 END

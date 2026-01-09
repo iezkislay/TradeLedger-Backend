@@ -1,7 +1,8 @@
 package com.store.app.enums;
 
 public enum LedgerType {
-    DEBIT,        // bill raised
-    CREDIT,       // payment received
-    ADJUSTMENT    // waiver / rounding / discount
+    DEBIT,          // bill raised
+    CREDIT,         // actual payment received
+    RETURN_CREDIT,  // goods returned (reduces liability)
+    ADJUSTMENT      // waiver / rounding / discount
 }

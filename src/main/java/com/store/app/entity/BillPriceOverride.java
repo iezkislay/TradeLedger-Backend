@@ -20,15 +20,22 @@ public class BillPriceOverride {
     private UUID id;
 
     @ManyToOne(optional = false)
-    @JoinColumn(name = "bill_item_id")
-    private BillItem billItem;
+    @JoinColumn(name = "bill_id", referencedColumnName = "id")
+    private Bill bill;
 
-    private BigDecimal originalPrice;
-    private BigDecimal overriddenPrice;
+    @Column(nullable = false, precision = 10, scale = 2)
+    private BigDecimal originalAmount;
 
-    @ManyToOne
-    @JoinColumn(name = "overridden_by")
+    @Column(nullable = false, precision = 10, scale = 2)
+    private BigDecimal overriddenAmount;
+
+    @Column
+    private String reason;
+
+    @ManyToOne(optional = false)
+    @JoinColumn(name = "overridden_by", referencedColumnName = "id")
     private User overriddenBy;
 
-    private LocalDateTime overriddenAt = LocalDateTime.now();
+    @Column(nullable = false)
+    private LocalDateTime overriddenAt;
 }

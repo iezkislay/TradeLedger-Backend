@@ -1,6 +1,6 @@
 package com.store.app.enums;
 
-public enum ReturnType {
+public enum ReturnSource {
     DELIVERED,
     PENDING
 }

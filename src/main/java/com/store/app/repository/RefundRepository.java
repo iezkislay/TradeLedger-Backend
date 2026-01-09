@@ -3,6 +3,7 @@ package com.store.app.repository;
 import com.store.app.entity.Refund;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -20,7 +21,40 @@ public interface RefundRepository extends JpaRepository<Refund, UUID> {
         FROM Refund r
         WHERE r.bill.id = :billId
     """)
-    BigDecimal sumRefundedAmountForBill(UUID billId);
+    BigDecimal sumRefundedAmountForBill(@Param("billId") UUID billId);
+
+    /* =====================================================
+       🆕 ALIAS — REQUIRED BY NEW REFUND FLOW (SAFE ADDITION)
+       ===================================================== */
+
+    @Query("""
+        SELECT COALESCE(SUM(r.amount), 0)
+        FROM Refund r
+        WHERE r.bill.id = :billId
+    """)
+    BigDecimal sumRefundedAmountByBillId(@Param("billId") UUID billId);
+
+    /* =====================================================
+       🆕 REQUIRED HELPER — SIGNATURE VARIANT (ADD ONLY)
+       ===================================================== */
+
+    @Query("""
+        SELECT COALESCE(SUM(r.amount), 0)
+        FROM Refund r
+        WHERE r.bill.id = :billId
+    """)
+    BigDecimal sumRefundedAmountByBill(UUID billId);
+
+    /* =====================================================
+       🆕 TOTAL REFUNDED — EXPLICIT HELPER (ADD ONLY)
+       ===================================================== */
+
+    @Query("""
+        SELECT COALESCE(SUM(r.amount), 0)
+        FROM Refund r
+        WHERE r.bill.id = :billId
+    """)
+    BigDecimal getTotalRefundedByBill(@Param("billId") UUID billId);
 
     /* =====================================================
        DASHBOARD — PHASE 3B (REFUND KPI)
@@ -32,5 +66,5 @@ public interface RefundRepository extends JpaRepository<Refund, UUID> {
         FROM Refund r
         WHERE DATE(r.createdAt) = :date
     """)
-    BigDecimal todayRefunds(LocalDate date);
+    BigDecimal todayRefunds(@Param("date") LocalDate date);
 }

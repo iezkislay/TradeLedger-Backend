@@ -1,6 +1,7 @@
 package com.store.app.controller;
 
 import com.store.app.dto.ApiResponse;
+import com.store.app.dto.BillListResponse;
 import com.store.app.dto.CustomerBalanceView;
 import com.store.app.dto.CustomerListResponse;
 import com.store.app.dto.CustomerStatementRowDto;
@@ -71,7 +72,6 @@ public class CustomerController {
 
     // =====================================================
     // 🆕 GET CUSTOMER LIST (COMPOSED, BALANCE + ADDRESS)
-    // ✅ SAFE ADDITION (NO PATH CONFLICT)
     // =====================================================
     @GetMapping("/list")
     public ResponseEntity<ApiResponse<List<CustomerListResponse>>> listCustomers(
@@ -90,7 +90,7 @@ public class CustomerController {
     }
 
     // =====================================================
-    // 🆕 GET CUSTOMERS WITH BALANCE (PAGINATED – OPTIONAL)
+    // 🆕 GET CUSTOMERS WITH BALANCE (PAGINATED)
     // =====================================================
     @GetMapping("/paged")
     public ResponseEntity<ApiResponse<Page<CustomerBalanceView>>> listCustomersPaged(
@@ -184,6 +184,26 @@ public class CustomerController {
                         true,
                         customerService.getPendingBills(customerId),
                         "Pending bills loaded"
+                )
+        );
+    }
+
+    // =====================================================
+    // 🆕 CUSTOMER BILLS (READ-ONLY)
+    // =====================================================
+    @GetMapping("/{id}/bills")
+    public ResponseEntity<ApiResponse<List<BillListResponse>>> getCustomerBills(
+            @PathVariable UUID id,
+            HttpSession session
+    ) {
+        User user = authService.getCurrentUser(session);
+        authService.requireBillingOrOwner(user);
+
+        return ResponseEntity.ok(
+                new ApiResponse<>(
+                        true,
+                        customerService.getCustomerBills(id),
+                        "Customer bills fetched"
                 )
         );
     }

@@ -1,13 +1,16 @@
 package com.store.app.service;
 
+import com.store.app.dto.BillListResponse;
 import com.store.app.dto.CustomerBalanceView;
 import com.store.app.dto.CustomerListResponse;
 import com.store.app.dto.CustomerStatementRowDto;
 import com.store.app.dto.PendingBillResponse;
+import com.store.app.entity.Bill;
 import com.store.app.entity.Customer;
 import com.store.app.entity.CustomerLedger;
 import com.store.app.entity.User;
 import com.store.app.enums.LedgerType;
+import com.store.app.repository.BillRepository;
 import com.store.app.repository.CustomerLedgerRepository;
 import com.store.app.repository.CustomerRepository;
 import org.springframework.data.domain.Page;
@@ -29,15 +32,18 @@ public class CustomerService {
 
     private final CustomerRepository customerRepo;
     private final CustomerLedgerRepository ledgerRepo;
+    private final BillRepository billRepo;
     private final AuthService authService;
 
     public CustomerService(
             CustomerRepository customerRepo,
             CustomerLedgerRepository ledgerRepo,
+            BillRepository billRepo,
             AuthService authService
     ) {
         this.customerRepo = customerRepo;
         this.ledgerRepo = ledgerRepo;
+        this.billRepo = billRepo;
         this.authService = authService;
     }
 
@@ -125,6 +131,37 @@ public class CustomerService {
                     return r;
                 })
                 .filter(r -> r.getDueAmount().signum() > 0)
+                .toList();
+    }
+
+    // =====================================================
+    // 🆕 CUSTOMER BILLS (READ-ONLY)
+    // =====================================================
+    public List<BillListResponse> getCustomerBills(UUID customerId) {
+
+        // ensure customer exists
+        customerRepo.findById(customerId)
+                .orElseThrow(() -> new RuntimeException("Customer not found"));
+
+        return billRepo.findByCustomerIdOrderByCreatedAtDesc(customerId)
+                .stream()
+                .map(bill -> {
+
+                    BigDecimal due = ledgerRepo.getDueForBill(bill.getId());
+                    BigDecimal paid = bill.getTotalAmount().subtract(due);
+
+                    BillListResponse r = new BillListResponse();
+                    r.setBillId(bill.getId());
+                    r.setBillNumber(bill.getBillNumber());
+                    r.setBillCode(bill.getBillCode());
+                    r.setBillDate(bill.getCreatedAt());
+                    r.setPaymentType(bill.getPaymentType().name());
+                    r.setTotalAmount(bill.getTotalAmount());
+                    r.setPaidAmount(paid);
+                    r.setDueAmount(due);
+
+                    return r;
+                })
                 .toList();
     }
 

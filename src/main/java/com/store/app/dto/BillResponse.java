@@ -19,24 +19,25 @@ public class BillResponse {
 
     private String paymentType;
 
-    // Customer (nullable for walk-in cash / upi)
+    // Customer
     private String customerName;
     private String customerMobile;
     private String customerAddress;
     private String customerCode;
 
-    // Amounts
+    // Original amounts (immutable)
     private BigDecimal subtotal;
     private BigDecimal discountAmount;
     private BigDecimal totalAmount;
+
+    // 🆕 Returns-aware
+    private BigDecimal returnedAmount;
+    private BigDecimal effectiveTotal;
+
+    // Settlement
     private BigDecimal amountPaid;
     private BigDecimal dueAmount;
 
     // Line items
     private List<BillItemResponse> items;
-
-    /* =========================
-       GETTERS & SETTERS
-       ========================= */
-
 }
