@@ -5,6 +5,7 @@ import com.store.app.dto.CreateRefundRequest;
 import com.store.app.dto.BillSummaryResponse;
 import com.store.app.entity.*;
 import com.store.app.enums.LedgerType;
+import com.store.app.enums.ReferenceType;
 import com.store.app.enums.RefundMode;
 import com.store.app.repository.*;
 import org.springframework.transaction.annotation.Transactional;
@@ -98,7 +99,9 @@ public class RefundService {
             CustomerLedger ledger = new CustomerLedger();
             ledger.setCustomer(customer);
             ledger.setBill(bill);
-            ledger.setEntryType(LedgerType.CREDIT);
+            ledger.setEntryType(LedgerType.RETURN_CREDIT);
+            ledger.setReferenceType(ReferenceType.REFUND);
+
             ledger.setAmount(amount);
 
             ledgerRepo.save(ledger);
@@ -148,7 +151,9 @@ public class RefundService {
         CustomerLedger ledger = new CustomerLedger();
         ledger.setCustomer(customer);
         ledger.setBill(ret.getBill());
-        ledger.setEntryType(LedgerType.CREDIT);
+        ledger.setEntryType(LedgerType.RETURN_CREDIT);
+        ledger.setReferenceType(ReferenceType.REFUND);
+
         ledger.setAmount(req.getAmount());
 
         ledgerRepo.save(ledger);
@@ -186,7 +191,9 @@ public class RefundService {
             CustomerLedger ledger = new CustomerLedger();
             ledger.setCustomer(bill.getCustomer());
             ledger.setBill(bill);
-            ledger.setEntryType(LedgerType.CREDIT);
+            ledger.setEntryType(LedgerType.RETURN_CREDIT);
+            ledger.setReferenceType(ReferenceType.REFUND);
+
             ledger.setAmount(amount);
             ledgerRepo.save(ledger);
         }
@@ -253,7 +260,9 @@ public class RefundService {
             CustomerLedger ledger = new CustomerLedger();
             ledger.setCustomer(bill.getCustomer());
             ledger.setBill(bill);
-            ledger.setEntryType(LedgerType.CREDIT);
+            ledger.setEntryType(LedgerType.RETURN_CREDIT);
+            ledger.setReferenceType(ReferenceType.REFUND);
+
             ledger.setAmount(refundAmount);
             ledgerRepo.save(ledger);
         }
@@ -284,7 +293,7 @@ public class RefundService {
 
         r.setBillId(bill.getId());
         r.setBillCode(bill.getBillCode());
-        r.setBillAmount(bill.getTotalAmount());
+        r.setTotalAmount(bill.getTotalAmount());
 
         BigDecimal overriddenAmount =
                 billPriceOverrideRepo.findByBill_Id(billId)
@@ -314,13 +323,11 @@ public class RefundService {
         r.setReturnedEffectiveValue(effectiveReturn);
 
         BigDecimal refunded =
-                refundRepo.sumRefundedAmountByBill(billId);
+                refundRepo.getTotalRefundedByBill(billId);
         if (refunded == null) refunded = BigDecimal.ZERO;
 
         r.setRefundedAmount(refunded);
-        r.setRefundableRemaining(
-                bill.getTotalAmount().subtract(refunded)
-        );
+        r.setRefundableRemaining(effectiveReturn.subtract(refunded));
 
         return r;
     }

@@ -263,6 +263,7 @@ public class ReturnService {
                 credit.setCustomer(customer);
                 credit.setBill(bill);
                 credit.setEntryType(LedgerType.CREDIT);
+                credit.setReferenceType(ReferenceType.REFUND);
                 credit.setAmount(creditToDue);
                 ledgerRepo.save(credit);
             }

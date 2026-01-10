@@ -26,67 +26,70 @@ public interface CustomerLedgerRepository
        ===================================================== */
 
     @Query("""
-    SELECT COALESCE(SUM(
-        CASE
-            WHEN l.entryType = com.store.app.enums.LedgerType.DEBIT THEN l.amount
-            WHEN l.entryType IN (
-                com.store.app.enums.LedgerType.CREDIT,
-                com.store.app.enums.LedgerType.RETURN_CREDIT,
-                com.store.app.enums.LedgerType.ADJUSTMENT
-            ) THEN -l.amount
-            ELSE 0
-        END
-    ), 0)
-    FROM CustomerLedger l
-    WHERE l.bill.id = :billId
-""")
+        SELECT COALESCE(SUM(
+            CASE
+                WHEN l.entryType = com.store.app.enums.LedgerType.DEBIT THEN l.amount
+                WHEN l.entryType IN (
+                    com.store.app.enums.LedgerType.CREDIT,
+                    com.store.app.enums.LedgerType.RETURN_CREDIT,
+                    com.store.app.enums.LedgerType.ADJUSTMENT
+                ) THEN -l.amount
+                ELSE 0
+            END
+        ), 0)
+        FROM CustomerLedger l
+        WHERE l.bill.id = :billId
+    """)
     BigDecimal getDueForBill(@Param("billId") UUID billId);
 
     /* =====================================================
-       🆕 CURRENT LEGALLY RECOVERABLE DUE (ADD ONLY)
+       🆕 CURRENT LEGALLY RECOVERABLE DUE
        ===================================================== */
 
     @Query("""
         SELECT
-            COALESCE(
-                SUM(CASE
-                        WHEN l.entryType = com.store.app.enums.LedgerType.DEBIT
-                        THEN l.amount
-                        ELSE 0
-                END), 0
-            )
+            COALESCE(SUM(CASE
+                WHEN l.entryType = com.store.app.enums.LedgerType.DEBIT
+                THEN l.amount
+                ELSE 0
+            END), 0)
             -
-            COALESCE(
-                SUM(CASE
-                        WHEN l.entryType = com.store.app.enums.LedgerType.CREDIT
-                        THEN l.amount
-                        ELSE 0
-                END), 0
-            )
+            COALESCE(SUM(CASE
+                WHEN l.entryType = com.store.app.enums.LedgerType.CREDIT
+                THEN l.amount
+                ELSE 0
+            END), 0)
             -
-            COALESCE(
-                SUM(CASE
-                        WHEN l.entryType = com.store.app.enums.LedgerType.RETURN_CREDIT
-                        THEN l.amount
-                        ELSE 0
-                END), 0
-            )
+            COALESCE(SUM(CASE
+                WHEN l.entryType = com.store.app.enums.LedgerType.RETURN_CREDIT
+                THEN l.amount
+                ELSE 0
+            END), 0)
         FROM CustomerLedger l
         WHERE l.bill.id = :billId
     """)
     BigDecimal getCurrentDue(@Param("billId") UUID billId);
 
     /* =====================================================
-       🆕 PURE CASH PAID — BILL LEVEL (ADD ONLY)
+       🆕 PURE CASH PAID — BILL LEVEL (CRITICAL FIX)
        ===================================================== */
 
+    /**
+     * Actual money collected from customer
+     * Excludes:
+     * - Return credits
+     * - Adjustments
+     * - Refund reversals
+     */
     @Query("""
-        SELECT COALESCE(SUM(l.amount), 0)
-        FROM CustomerLedger l
-        WHERE l.bill.id = :billId
-          AND l.entryType = com.store.app.enums.LedgerType.CREDIT
-    """)
-    BigDecimal getTotalPaidForBill(@Param("billId") UUID billId);
+    SELECT COALESCE(SUM(l.amount), 0)
+    FROM CustomerLedger l
+    WHERE l.bill.id = :billId
+      AND l.entryType = com.store.app.enums.LedgerType.CREDIT
+      AND l.referenceType = com.store.app.enums.ReferenceType.PAYMENT
+""")
+    BigDecimal getActualPaidAmount(@Param("billId") UUID billId);
+
 
     /* =====================================================
        PENDING BILLS
@@ -131,7 +134,7 @@ public interface CustomerLedgerRepository
        KPI — LEDGER TRUTH
        ===================================================== */
 
-    // 💵 Cash actually collected
+    // 💵 Cash actually collected (legacy, all credits)
     @Query("""
         SELECT COALESCE(SUM(l.amount), 0)
         FROM CustomerLedger l
@@ -161,7 +164,7 @@ public interface CustomerLedgerRepository
     BigDecimal totalOutstandingLedger();
 
     /* =====================================================
-       LEDGER BALANCE — CUSTOMER LEVEL (SAFE, USED BY API)
+       LEDGER BALANCE — CUSTOMER LEVEL
        ===================================================== */
 
     @Query("""
@@ -180,7 +183,7 @@ public interface CustomerLedgerRepository
     BigDecimal calculateBalance(@Param("customerId") UUID customerId);
 
     /* =====================================================
-       CUSTOMER STATEMENT — TIMELINE (DESC)
+       CUSTOMER STATEMENT — TIMELINE
        ===================================================== */
 
     @Query("""
@@ -192,7 +195,7 @@ public interface CustomerLedgerRepository
     List<CustomerLedger> findStatement(@Param("customerId") UUID customerId);
 
     /* =====================================================
-       CUSTOMER BALANCE VIEW — DASHBOARD / PAGINATION (LEGACY)
+       CUSTOMER BALANCE VIEW — DASHBOARD
        ===================================================== */
 
     @Query("""
@@ -222,7 +225,7 @@ public interface CustomerLedgerRepository
     Page<CustomerBalanceView> fetchCustomerBalances(Pageable pageable);
 
     /* =====================================================
-       🆕 AGGREGATION — CUSTOMER BALANCES (FAST, SAFE)
+       AGGREGATION — CUSTOMER BALANCES
        ===================================================== */
 
     @Query("""
@@ -233,7 +236,7 @@ public interface CustomerLedgerRepository
                     WHEN cl.entryType = 'DEBIT' THEN cl.amount
                     WHEN cl.entryType = 'CREDIT' THEN -cl.amount
                     WHEN cl.entryType = 'RETURN_CREDIT' THEN -cl.amount
-                    WHEN cl.entryType = 'ADJUST' THEN -cl.amount
+                    WHEN cl.entryType = 'ADJUSTMENT' THEN -cl.amount
                     ELSE 0
                 END
             ), 0)
@@ -243,7 +246,7 @@ public interface CustomerLedgerRepository
     List<Object[]> calculateBalances();
 
     /* =====================================================
-       🆕 AGGREGATION — LAST TRANSACTION DATE
+       AGGREGATION — LAST TRANSACTION DATE
        ===================================================== */
 
     @Query("""

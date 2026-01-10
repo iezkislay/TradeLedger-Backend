@@ -39,6 +39,7 @@ public class BillingService {
 
     private final BillPriceOverrideRepository billPriceOverrideRepo;
     private final ReturnItemRepository returnItemRepo;
+    private final ReturnNoteRepository returnNoteRepo;
 
     @Getter
     private final NotificationService notificationService;
@@ -57,6 +58,7 @@ public class BillingService {
             AuditService auditService,
             BillPriceOverrideRepository billPriceOverrideRepo,
             ReturnItemRepository returnItemRepo,
+            ReturnNoteRepository returnNoteRepo,
             NotificationService notificationService
     ) {
         this.billRepo = billRepo;
@@ -72,6 +74,7 @@ public class BillingService {
         this.auditService = auditService;
         this.billPriceOverrideRepo = billPriceOverrideRepo;
         this.returnItemRepo = returnItemRepo;
+        this.returnNoteRepo = returnNoteRepo;
         this.notificationService = notificationService;
     }
 
@@ -210,15 +213,20 @@ public class BillingService {
             debit.setCustomer(customer);
             debit.setBill(bill);
             debit.setEntryType(LedgerType.DEBIT);
+            debit.setReferenceType(ReferenceType.BILL);
             debit.setAmount(finalAmount);
             ledgerRepo.save(debit);
 
             // 🟢 2️⃣ Money received at billing time
             if (amountPaid.signum() > 0) {
                 CustomerLedger credit = new CustomerLedger();
+                credit.setEntryType(LedgerType.CREDIT);
+                credit.setReferenceType(ReferenceType.PAYMENT);
+                credit.setAmount(amountPaid);
+
                 credit.setCustomer(customer);
                 credit.setBill(bill);
-                credit.setEntryType(LedgerType.CREDIT);
+
                 credit.setAmount(amountPaid);
                 ledgerRepo.save(credit);
             }
@@ -307,7 +315,6 @@ public class BillingService {
                 user
         );
     }
-
     /* =====================================================
    READ — BILL DETAILS (LEDGER TRUTH)
    ===================================================== */
@@ -316,33 +323,40 @@ public class BillingService {
         Bill bill = billRepo.findById(billId)
                 .orElseThrow(() -> new RuntimeException("Bill not found"));
 
-        BigDecimal dueFromLedger =
-                ledgerRepo.getDueForBill(billId);
-
+        // ==============================
+        // 🔹 DUE — LEDGER SOURCE OF TRUTH
+        // ==============================
+        BigDecimal dueFromLedger = ledgerRepo.getDueForBill(billId);
         if (dueFromLedger == null) {
             dueFromLedger = BigDecimal.ZERO;
         }
 
-        BigDecimal returnedValue =
-                returnItemRepo.sumReturnValueByBill(billId);
-
+        // ==============================
+        // 🔹 RETURNED VALUE (ERP TRUTH)
+        // ==============================
+        BigDecimal returnedValue = returnItemRepo.sumReturnValueByBill(billId);
         if (returnedValue == null) {
             returnedValue = BigDecimal.ZERO;
         }
 
+        // ==============================
+        // 🔹 EFFECTIVE TOTAL (CAP)
+        // ==============================
         BigDecimal effectiveTotal =
                 bill.getTotalAmount().max(BigDecimal.ZERO);
 
+        // ==============================
+        // 🔹 CASH PAID ONLY (CREDIT ENTRIES)
+        // ==============================
         BigDecimal amountPaid =
-                ledgerRepo.getTotalPaidForBill(billId);
+                ledgerRepo.getActualPaidAmount(billId);
 
         if (amountPaid == null) {
             amountPaid = BigDecimal.ZERO;
         }
 
-        // 🔒 SAFETY NET — NEVER EXPOSE NEGATIVE DUE
-        BigDecimal safeDue =
-                dueFromLedger.max(BigDecimal.ZERO);
+        // 🔒 NEVER EXPOSE NEGATIVE DUE
+        BigDecimal safeDue = dueFromLedger.max(BigDecimal.ZERO);
 
         BillResponse res = new BillResponse();
         res.setBillId(bill.getId());
@@ -365,6 +379,7 @@ public class BillingService {
         res.setReturnedAmount(returnedValue);
         res.setEffectiveTotal(effectiveTotal);
 
+        // ✅ FINAL CORRECT VALUES
         res.setAmountPaid(amountPaid);
         res.setDueAmount(safeDue);
 

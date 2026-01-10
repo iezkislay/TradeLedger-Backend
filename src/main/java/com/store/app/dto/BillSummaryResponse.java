@@ -13,15 +13,35 @@ public class BillSummaryResponse {
     private UUID billId;
     private String billCode;
 
-    private BigDecimal billAmount;
+    /**
+     * Final bill total (cap for returns & refunds)
+     */
+    private BigDecimal totalAmount;
+
+    /**
+     * Overridden bill amount (if any)
+     */
     private BigDecimal overriddenAmount;
 
+    /**
+     * Returns (ERP truth)
+     */
     private BigDecimal returnedGrossValue;
     private BigDecimal returnedEffectiveValue;
 
+    /**
+     * Refunds issued (cash out)
+     */
     private BigDecimal refundedAmount;
+
+    /**
+     * Remaining refundable value
+     */
     private BigDecimal refundableRemaining;
 
+    /**
+     * Return split
+     */
     private BigDecimal deliveredReturnValue;
     private BigDecimal pendingReturnValue;
 }

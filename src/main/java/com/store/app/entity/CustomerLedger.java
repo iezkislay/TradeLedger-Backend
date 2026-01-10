@@ -1,6 +1,7 @@
 package com.store.app.entity;
 
 import com.store.app.enums.LedgerType;
+import com.store.app.enums.ReferenceType;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.Setter;
@@ -29,12 +30,20 @@ public class CustomerLedger {
 
     /**
      * DEBIT  → Bill raised
-     * CREDIT → Payment received
+     * CREDIT → Payment received / refund / return credit
      * ADJUSTMENT → Waiver / rounding / discount
      */
     @Enumerated(EnumType.STRING)
     @Column(name = "entry_type", nullable = false)
     private LedgerType entryType;
+
+    /**
+     * SOURCE OF LEDGER ENTRY
+     * BILL / PAYMENT / RETURN / REFUND / ADJUSTMENT
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "reference_type", nullable = false)
+    private ReferenceType referenceType;
 
     /**
      * Always POSITIVE
