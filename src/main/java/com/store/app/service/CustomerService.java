@@ -5,7 +5,6 @@ import com.store.app.dto.CustomerBalanceView;
 import com.store.app.dto.CustomerListResponse;
 import com.store.app.dto.CustomerStatementRowDto;
 import com.store.app.dto.PendingBillResponse;
-import com.store.app.entity.Bill;
 import com.store.app.entity.Customer;
 import com.store.app.entity.CustomerLedger;
 import com.store.app.entity.User;

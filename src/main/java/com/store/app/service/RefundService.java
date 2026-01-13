@@ -4,16 +4,12 @@ import com.store.app.dto.RefundRequest;
 import com.store.app.dto.CreateRefundRequest;
 import com.store.app.dto.BillSummaryResponse;
 import com.store.app.entity.*;
-import com.store.app.enums.LedgerType;
-import com.store.app.enums.ReferenceType;
-import com.store.app.enums.RefundMode;
 import com.store.app.repository.*;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
-import java.util.Optional;
 import java.util.UUID;
 
 @Service
@@ -24,10 +20,8 @@ public class RefundService {
     private final ReturnRepository returnRepo;
     private final ReturnItemRepository returnItemRepo;
     private final BillPriceOverrideRepository billPriceOverrideRepo;
-    private final CustomerLedgerRepository ledgerRepo;
     private final AuthService authService;
     private final AuditService auditService;
-    private final ReturnNoteRepository returnNoteRepo;
 
     public RefundService(
             RefundRepository refundRepo,
@@ -35,20 +29,16 @@ public class RefundService {
             ReturnRepository returnRepo,
             ReturnItemRepository returnItemRepo,
             BillPriceOverrideRepository billPriceOverrideRepo,
-            CustomerLedgerRepository ledgerRepo,
             AuthService authService,
-            AuditService auditService,
-            ReturnNoteRepository returnNoteRepo
+            AuditService auditService
     ) {
         this.refundRepo = refundRepo;
         this.billRepo = billRepo;
         this.returnRepo = returnRepo;
         this.returnItemRepo = returnItemRepo;
         this.billPriceOverrideRepo = billPriceOverrideRepo;
-        this.ledgerRepo = ledgerRepo;
         this.authService = authService;
         this.auditService = auditService;
-        this.returnNoteRepo = returnNoteRepo;
     }
 
     /* =====================================================
@@ -70,7 +60,9 @@ public class RefundService {
         BigDecimal alreadyRefunded =
                 refundRepo.sumRefundedAmountForBill(bill.getId());
 
-        if (alreadyRefunded == null) alreadyRefunded = BigDecimal.ZERO;
+        if (alreadyRefunded == null) {
+            alreadyRefunded = BigDecimal.ZERO;
+        }
 
         BigDecimal refundable =
                 bill.getTotalAmount().subtract(alreadyRefunded);
@@ -88,24 +80,6 @@ public class RefundService {
         refund.setCreatedBy(user);
 
         refundRepo.save(refund);
-
-        if (req.getRefundMode() == RefundMode.CREDIT) {
-
-            Customer customer = bill.getCustomer();
-            if (customer == null) {
-                throw new RuntimeException("CREDIT refund requires customer");
-            }
-
-            CustomerLedger ledger = new CustomerLedger();
-            ledger.setCustomer(customer);
-            ledger.setBill(bill);
-            ledger.setEntryType(LedgerType.RETURN_CREDIT);
-            ledger.setReferenceType(ReferenceType.REFUND);
-
-            ledger.setAmount(amount);
-
-            ledgerRepo.save(ledger);
-        }
 
         auditService.log(
                 "BILL",
@@ -148,16 +122,6 @@ public class RefundService {
 
         refundRepo.save(refund);
 
-        CustomerLedger ledger = new CustomerLedger();
-        ledger.setCustomer(customer);
-        ledger.setBill(ret.getBill());
-        ledger.setEntryType(LedgerType.RETURN_CREDIT);
-        ledger.setReferenceType(ReferenceType.REFUND);
-
-        ledger.setAmount(req.getAmount());
-
-        ledgerRepo.save(ledger);
-
         auditService.log(
                 "REFUND",
                 refund.getId(),
@@ -178,25 +142,17 @@ public class RefundService {
             String reason,
             User user
     ) {
-        if (amount == null || amount.signum() <= 0) return;
+        if (amount == null || amount.signum() <= 0) {
+            return;
+        }
 
         Refund refund = new Refund();
         refund.setBill(bill);
         refund.setAmount(amount);
         refund.setReason(reason);
         refund.setCreatedBy(user);
+
         refundRepo.save(refund);
-
-        if (bill.getCustomer() != null) {
-            CustomerLedger ledger = new CustomerLedger();
-            ledger.setCustomer(bill.getCustomer());
-            ledger.setBill(bill);
-            ledger.setEntryType(LedgerType.RETURN_CREDIT);
-            ledger.setReferenceType(ReferenceType.REFUND);
-
-            ledger.setAmount(amount);
-            ledgerRepo.save(ledger);
-        }
 
         auditService.log(
                 "REFUND",
@@ -256,17 +212,6 @@ public class RefundService {
 
         refundRepo.save(refund);
 
-        if (bill.getCustomer() != null) {
-            CustomerLedger ledger = new CustomerLedger();
-            ledger.setCustomer(bill.getCustomer());
-            ledger.setBill(bill);
-            ledger.setEntryType(LedgerType.RETURN_CREDIT);
-            ledger.setReferenceType(ReferenceType.REFUND);
-
-            ledger.setAmount(refundAmount);
-            ledgerRepo.save(ledger);
-        }
-
         auditService.log(
                 "REFUND",
                 refund.getId(),
@@ -276,7 +221,6 @@ public class RefundService {
                 user
         );
     }
-
 
     /* =====================================================
        🧾 BILL SUMMARY — UNCHANGED
@@ -324,7 +268,10 @@ public class RefundService {
 
         BigDecimal refunded =
                 refundRepo.getTotalRefundedByBill(billId);
-        if (refunded == null) refunded = BigDecimal.ZERO;
+
+        if (refunded == null) {
+            refunded = BigDecimal.ZERO;
+        }
 
         r.setRefundedAmount(refunded);
         r.setRefundableRemaining(effectiveReturn.subtract(refunded));

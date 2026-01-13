@@ -300,6 +300,7 @@ public class BillingService {
             ledger.setCustomer(bill.getCustomer());
             ledger.setBill(bill);
             ledger.setEntryType(LedgerType.CREDIT);
+            ledger.setReferenceType(ReferenceType.PRICE_OVERRIDE);
             ledger.setAmount(discount);
             ledger.setCreatedAt(LocalDateTime.now());
 
@@ -498,6 +499,7 @@ public class BillingService {
             credit.setCustomer(bill.getCustomer());
             credit.setBill(bill);
             credit.setEntryType(LedgerType.CREDIT);
+            credit.setReferenceType(ReferenceType.PAYMENT);
             credit.setAmount(paid);
             ledgerRepo.save(credit);
         }
@@ -507,6 +509,7 @@ public class BillingService {
             waive.setCustomer(bill.getCustomer());
             waive.setBill(bill);
             waive.setEntryType(LedgerType.ADJUSTMENT);
+            waive.setReferenceType(ReferenceType.ADJUSTMENT);
             waive.setAmount(adjustment);
             ledgerRepo.save(waive);
         }
