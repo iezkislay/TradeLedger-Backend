@@ -15,7 +15,6 @@ public class BillListResponse {
     private String billNumber;
     private String billCode;
     private LocalDateTime billDate;
-
     private String paymentType;
 
     private String customerName;
@@ -24,4 +23,7 @@ public class BillListResponse {
     private BigDecimal totalAmount;
     private BigDecimal paidAmount;
     private BigDecimal dueAmount;
+
+    // ✅ NEW — exposed state
+    private String state;
 }

@@ -2,13 +2,17 @@ package com.store.app.service;
 
 import com.store.app.dto.ReturnItemRequest;
 import com.store.app.entity.*;
+import com.store.app.enums.PaymentType;
 import com.store.app.enums.LedgerType;
 import com.store.app.enums.ReferenceType;
 import com.store.app.enums.ReturnSource;
 import com.store.app.enums.StockTxnType;
+import com.store.app.enums.RefundMode;
 import com.store.app.repository.*;
 import jakarta.transaction.Transactional;
 import org.springframework.stereotype.Service;
+import static com.store.app.util.BillGuards.ensureActiveForOps;
+
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -25,7 +29,9 @@ public class ReturnService {
     private final CustomerLedgerRepository ledgerRepo;
     private final StockRepository stockRepo;
     private final StockTransactionRepository stockTxnRepo;
+    private final RefundRepository refundRepo;
     private final RefundService refundService;
+    private final AuditService auditService;
 
     public ReturnService(
             BillItemRepository billItemRepo,
@@ -34,7 +40,9 @@ public class ReturnService {
             CustomerLedgerRepository ledgerRepo,
             StockRepository stockRepo,
             StockTransactionRepository stockTxnRepo,
-            RefundService refundService
+            RefundRepository refundRepo,
+            RefundService refundService,
+            AuditService auditService
     ) {
         this.billItemRepo = billItemRepo;
         this.returnItemRepo = returnItemRepo;
@@ -42,12 +50,14 @@ public class ReturnService {
         this.ledgerRepo = ledgerRepo;
         this.stockRepo = stockRepo;
         this.stockTxnRepo = stockTxnRepo;
+        this.refundRepo = refundRepo;
         this.refundService = refundService;
+        this.auditService = auditService;
     }
 
     /* =====================================================
-       STEP 1 — CREATE RETURN NOTE (USER-INTENT SAFE)
-       ===================================================== */
+   STEP 1 — CREATE RETURN NOTE (USER-INTENT SAFE)
+   ===================================================== */
     @Transactional
     public ReturnNote createReturnNote(
             List<ReturnItemRequest> items,
@@ -67,7 +77,7 @@ public class ReturnService {
         for (ReturnItemRequest req : items) {
 
             if (req.getReturnSource() == null) {
-                throw new RuntimeException("Return source is required (DELIVERED / PENDING)");
+                throw new RuntimeException("Return source is required");
             }
 
             BillItem billItem = billItemRepo.findById(req.getBillItemId())
@@ -75,10 +85,11 @@ public class ReturnService {
 
             if (bill == null) {
                 bill = billItem.getBill();
+                ensureActiveForOps(bill);
                 note.setBill(bill);
-                returnNoteRepo.save(note);
+                returnNoteRepo.save(note); // needed for FK usage
             } else if (!bill.getId().equals(billItem.getBill().getId())) {
-                throw new RuntimeException("All return items must belong to the same bill");
+                throw new RuntimeException("All return items must belong to same bill");
             }
 
             BigDecimal requestedQty = req.getReturnedQuantity();
@@ -86,36 +97,50 @@ public class ReturnService {
                 throw new RuntimeException("Returned quantity must be positive");
             }
 
-            BigDecimal deliveredReturn = BigDecimal.ZERO;
-            BigDecimal pendingReturn = BigDecimal.ZERO;
+            BigDecimal delivered = BigDecimal.ZERO;
+            BigDecimal pending = BigDecimal.ZERO;
 
             if (req.getReturnSource() == ReturnSource.DELIVERED) {
 
-                BigDecimal alreadyReturnedDelivered =
+                BigDecimal alreadyReturned =
                         returnItemRepo.getTotalReturnedDeliveredQtyForBillItem(billItem.getId());
 
                 BigDecimal maxAllowed =
-                        billItem.getFulfilledQty().subtract(alreadyReturnedDelivered);
+                        billItem.getFulfilledQty().subtract(alreadyReturned);
 
                 if (requestedQty.compareTo(maxAllowed) > 0) {
-                    throw new RuntimeException("Delivered return exceeds fulfilled quantity");
+                    throw new RuntimeException("Delivered return exceeds fulfilled qty");
                 }
 
-                deliveredReturn = requestedQty;
+                delivered = requestedQty;
+
+                Stock stock = stockRepo.findById(billItem.getItem().getId())
+                        .orElseThrow(() -> new RuntimeException("Stock not found"));
+
+                stock.setQuantity(stock.getQuantity().add(delivered));
+                stockRepo.save(stock);
+
+                StockTransaction txn = new StockTransaction();
+                txn.setItem(billItem.getItem());
+                txn.setTransactionType(StockTxnType.IN);
+                txn.setQuantity(delivered);
+                txn.setReferenceType(ReferenceType.RETURN);
+                txn.setReferenceId(note.getId());
+                stockTxnRepo.save(txn);
 
             } else {
 
-                BigDecimal alreadyReturnedPending =
+                BigDecimal alreadyReturned =
                         returnItemRepo.getTotalReturnedPendingQtyForBillItem(billItem.getId());
 
                 BigDecimal maxAllowed =
-                        billItem.getPendingQty().subtract(alreadyReturnedPending);
+                        billItem.getPendingQty().subtract(alreadyReturned);
 
                 if (requestedQty.compareTo(maxAllowed) > 0) {
-                    throw new RuntimeException("Pending return exceeds pending quantity");
+                    throw new RuntimeException("Pending return exceeds pending qty");
                 }
 
-                pendingReturn = requestedQty;
+                pending = requestedQty;
             }
 
             BigDecimal lineAmount =
@@ -123,55 +148,85 @@ public class ReturnService {
 
             returnedGross = returnedGross.add(lineAmount);
 
-            if (deliveredReturn.signum() > 0) {
-
-                Stock stock = stockRepo.findById(billItem.getItem().getId())
-                        .orElseThrow(() -> new RuntimeException("Stock not found"));
-
-                stock.setQuantity(stock.getQuantity().add(deliveredReturn));
-                stockRepo.save(stock);
-
-                StockTransaction txn = new StockTransaction();
-                txn.setItem(billItem.getItem());
-                txn.setTransactionType(StockTxnType.IN);
-                txn.setQuantity(deliveredReturn);
-                txn.setReferenceType(ReferenceType.RETURN);
-                txn.setReferenceId(note.getId());
-                stockTxnRepo.save(txn);
-            }
-
             ReturnItem ri = new ReturnItem();
             ri.setReturnNote(note);
             ri.setBill(bill);
             ri.setBillItem(billItem);
             ri.setItem(billItem.getItem());
-            ri.setReturnedDeliveredQty(deliveredReturn);
-            ri.setReturnedPendingQty(pendingReturn);
+            ri.setReturnedDeliveredQty(delivered);
+            ri.setReturnedPendingQty(pending);
             ri.setPrice(billItem.getPrice());
 
             returnItemRepo.save(ri);
         }
 
-        BigDecimal billSubtotal = bill.getSubtotal();
-        if (billSubtotal == null || billSubtotal.signum() <= 0) {
-            throw new RuntimeException("Invalid bill subtotal");
-        }
+    /* ===============================
+       BASE CALCULATION
+       =============================== */
 
+        BigDecimal billSubtotal = bill.getSubtotal();
         BigDecimal billDiscount = bill.getDiscountAmount();
 
-        BigDecimal returnPercentage =
+        BigDecimal returnRatio =
                 returnedGross.divide(billSubtotal, 6, RoundingMode.HALF_UP);
 
         BigDecimal clawedDiscount =
-                billDiscount.multiply(returnPercentage)
+                billDiscount.multiply(returnRatio)
                         .setScale(2, RoundingMode.HALF_UP);
 
         BigDecimal netReturn =
                 returnedGross.subtract(clawedDiscount);
 
-        if (netReturn.signum() <= 0) {
-            throw new RuntimeException("Net return must be positive");
+    /* ===============================
+       🔥 RESIDUAL ADJUSTMENT (HERE)
+       =============================== */
+
+        BigDecimal alreadyReturned =
+                returnNoteRepo.sumNetReturnsByBill(bill.getId());
+
+        BigDecimal billEffectiveTotal =
+                bill.getSubtotal().subtract(bill.getDiscountAmount());
+
+        BigDecimal remainingCapacity =
+                billEffectiveTotal.subtract(alreadyReturned);
+
+        if (remainingCapacity.signum() < 0) {
+            throw new IllegalStateException("Returns already exceed bill total");
         }
+
+        if (netReturn.compareTo(remainingCapacity) > 0) {
+
+            BigDecimal delta =
+                    netReturn.subtract(remainingCapacity);
+
+            if (delta.abs().compareTo(BigDecimal.ONE) > 0) {
+                throw new IllegalStateException(
+                        "Residual delta exceeds tolerance (₹1.00)"
+                );
+            }
+
+            // Adjust
+            netReturn = remainingCapacity;
+            clawedDiscount = clawedDiscount.add(delta);
+
+            note.setResidualAdjusted(true);
+            note.setAdjustmentNote(
+                    "Rounded by ₹" + delta.setScale(2) + " to match Bill total"
+            );
+
+            auditService.log(
+                    "RETURN_NOTE",
+                    note.getId(),
+                    "ROUNDING_RESIDUAL",
+                    null,
+                    note.getAdjustmentNote(),
+                    user
+            );
+        }
+
+    /* ===============================
+       SAVE FINAL VALUES
+       =============================== */
 
         note.setReturnedGrossAmount(returnedGross);
         note.setClawedDiscountAmount(clawedDiscount);
@@ -182,8 +237,8 @@ public class ReturnService {
     }
 
     /* =====================================================
-       STEP 2 — FINALIZE RETURN (RESIDUAL SAFE & IDEMPOTENT)
-       ===================================================== */
+   STEP 2 — FINALIZE RETURN (EXECUTION ONLY)
+   ===================================================== */
     @Transactional
     public void finalizeReturn(UUID returnNoteId, User user) {
 
@@ -191,92 +246,82 @@ public class ReturnService {
                 .orElseThrow(() -> new RuntimeException("Return note not found"));
 
         if (note.isFinalized()) {
-            return;
+            return; // idempotent
         }
 
         Bill bill = note.getBill();
+        ensureActiveForOps(bill);
 
-        // ===============================
-        // 🔒 BILL CAP (SOURCE OF TRUTH)
-        // ===============================
-        BigDecimal billCap = bill.getTotalAmount();
+        BigDecimal effectiveReturn = note.getNetReturnAmount();
 
-        BigDecimal alreadyFinalized =
-                returnNoteRepo.sumFinalizedNetReturnByBill(bill.getId());
+    /* =====================================================
+       1️⃣ CREDIT LEDGER (DUE-ONLY ADJUSTMENT)
+       ===================================================== */
 
-        if (alreadyFinalized == null) {
-            alreadyFinalized = BigDecimal.ZERO;
-        }
+        if (bill.getPaymentType() == PaymentType.CREDIT) {
 
-        BigDecimal remainingCap =
-                billCap.subtract(alreadyFinalized);
+            BigDecimal currentDue =
+                    ledgerRepo.getCustomerBalance(bill.getId());
 
-        // ===============================
-        // 🧮 RESIDUAL ROUNDING ADJUSTMENT
-        // ===============================
-        BigDecimal tolerance = new BigDecimal("1.00");
+            if (currentDue == null || currentDue.signum() <= 0) {
+                // Nothing owed → ledger must NOT be touched
+                // Excess will be handled via refund flow
+            } else {
 
-        BigDecimal diff =
-                note.getNetReturnAmount().subtract(remainingCap).abs();
+                BigDecimal ledgerAdjustment =
+                        effectiveReturn.min(currentDue);
 
-        if (diff.compareTo(tolerance) <= 0) {
+                if (ledgerAdjustment.signum() > 0) {
 
-            note.setNetReturnAmount(remainingCap);
+                    CustomerLedger entry = new CustomerLedger();
+                    entry.setBill(bill);
+                    entry.setCustomer(bill.getCustomer());
+                    entry.setEntryType(LedgerType.RETURN_CREDIT);
+                    entry.setReferenceType(ReferenceType.RETURN);
+                    entry.setAmount(ledgerAdjustment);
 
-            BigDecimal adjustedClawback =
-                    note.getReturnedGrossAmount().subtract(remainingCap);
-
-            note.setClawedDiscountAmount(
-                    adjustedClawback.max(BigDecimal.ZERO)
-            );
-
-            returnNoteRepo.save(note);
-
-        } else if (note.getNetReturnAmount().compareTo(remainingCap) > 0) {
-            throw new RuntimeException(
-                    "Return exceeds remaining bill value. Max allowed: ₹" + remainingCap
-            );
-        }
-
-        BigDecimal finalNet = note.getNetReturnAmount();
-        Customer customer = bill.getCustomer();
-
-        if (customer == null) {
-
-            refundService.createRefundUnchecked(
-                    bill,
-                    finalNet,
-                    "Refund against finalized return",
-                    user
-            );
-
-
-        } else {
-
-            BigDecimal due = ledgerRepo.getDueForBill(bill.getId());
-            if (due == null) due = BigDecimal.ZERO;
-
-            BigDecimal creditToDue = finalNet.min(due);
-
-            if (creditToDue.signum() > 0) {
-                CustomerLedger credit = new CustomerLedger();
-                credit.setCustomer(customer);
-                credit.setBill(bill);
-                credit.setEntryType(LedgerType.RETURN_CREDIT);
-                credit.setReferenceType(ReferenceType.RETURN);
-                credit.setAmount(creditToDue);
-                ledgerRepo.save(credit);
-            }
-
-            BigDecimal refundAmount = finalNet.subtract(creditToDue);
-
-            if (refundAmount.signum() > 0) {
-                refundService.refundFromReturnNote(bill, refundAmount, user);
+                    ledgerRepo.save(entry);
+                }
             }
         }
+
+    /* =====================================================
+       2️⃣ AUTO REFUND (OPTION B — ONLY IF NONE EXISTS)
+       ===================================================== */
+
+        BigDecimal refundedSoFar =
+                refundRepo.sumRefundedAmountByReturnNoteId(note.getId());
+
+        if (refundedSoFar == null) {
+            refundedSoFar = BigDecimal.ZERO;
+        }
+
+        BigDecimal refundableRemaining =
+                effectiveReturn.subtract(refundedSoFar);
+
+        if (refundedSoFar.signum() == 0 && refundableRemaining.signum() > 0) {
+
+            Refund refund = new Refund();
+            refund.setBill(bill);
+            refund.setReturnNote(note);
+            refund.setAmount(refundableRemaining);
+            refund.setRefundMode(
+                    bill.getPaymentType() == PaymentType.UPI
+                            ? RefundMode.UPI
+                            : RefundMode.CASH
+            );
+            refund.setReason("Auto refund on return finalization");
+
+            refundRepo.save(refund);
+        }
+
+    /* =====================================================
+       3️⃣ FINALIZE NOTE
+       ===================================================== */
 
         note.setFinalized(true);
         note.setFinalizedAt(LocalDateTime.now());
+
         returnNoteRepo.save(note);
     }
 }

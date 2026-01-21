@@ -47,5 +47,9 @@ public class Refund {
     @JoinColumn(name = "created_by")
     private User createdBy;
 
+    @ManyToOne
+    @JoinColumn(name = "return_note_id")
+    private ReturnNote returnNote;
+
     private LocalDateTime createdAt = LocalDateTime.now();
 }

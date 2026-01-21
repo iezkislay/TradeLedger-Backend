@@ -47,6 +47,30 @@ public class ReturnNote {
     @Column(nullable = false)
     private BigDecimal netReturnAmount = BigDecimal.ZERO;
 
+    /* =====================================================
+       🔁 ROUNDING / RESIDUAL ADJUSTMENT
+       ===================================================== */
+
+    /**
+     * Whether netReturnAmount was force-adjusted
+     * to absorb rounding residuals (±₹1)
+     */
+    @Column(
+            name = "is_residual_adjusted",
+            nullable = false
+    )
+    private boolean residualAdjusted = false;
+
+    /**
+     * Reason / marker for residual adjustment
+     * e.g. ROUNDING_RESIDUAL
+     */
+    @Column(
+            name = "adjustment_note",
+            length = 255
+    )
+    private String adjustmentNote;
+
     @ManyToOne
     @JoinColumn(name = "created_by")
     private User createdBy;

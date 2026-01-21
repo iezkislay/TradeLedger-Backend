@@ -1,6 +1,5 @@
 package com.store.app.service;
 
-import com.store.app.dto.BillItemResponse;
 import com.store.app.entity.BillItem;
 import com.store.app.repository.BillItemRepository;
 import lombok.RequiredArgsConstructor;
@@ -15,14 +14,12 @@ public class BillItemService {
     private final BillItemRepository billItemRepo;
 
     /* =====================================================
-       🧾 GET SINGLE BILL ITEM (READ ONLY)
+       🧾 GET SINGLE BILL ITEM (DOMAIN ONLY)
        ===================================================== */
 
-    public BillItemResponse getBillItem(UUID billItemId) {
+    public BillItem getBillItem(UUID billItemId) {
 
-        BillItem bi = billItemRepo.findById(billItemId)
+        return billItemRepo.findById(billItemId)
                 .orElseThrow(() -> new RuntimeException("Bill item not found"));
-
-        return BillItemResponse.fromSingle(bi);
     }
 }

@@ -1,14 +1,11 @@
 package com.store.app.service;
 
+import org.springframework.transaction.annotation.Transactional;
 import com.store.app.dto.*;
 import com.store.app.entity.*;
-import com.store.app.enums.LedgerType;
-import com.store.app.enums.PaymentType;
-import com.store.app.enums.ReferenceType;
-import com.store.app.enums.StockTxnType;
+import com.store.app.enums.*;
 import com.store.app.repository.*;
 import com.store.app.util.WhatsAppTemplates;
-import jakarta.transaction.Transactional;
 import lombok.Getter;
 import org.springframework.stereotype.Service;
 
@@ -18,6 +15,8 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.UUID;
+
+import static com.store.app.util.BillGuards.ensureNotClosed;
 
 @Service
 public class BillingService {
@@ -40,6 +39,7 @@ public class BillingService {
     private final BillPriceOverrideRepository billPriceOverrideRepo;
     private final ReturnItemRepository returnItemRepo;
     private final ReturnNoteRepository returnNoteRepo;
+    private final RefundRepository refundRepo;
 
     @Getter
     private final NotificationService notificationService;
@@ -59,8 +59,10 @@ public class BillingService {
             BillPriceOverrideRepository billPriceOverrideRepo,
             ReturnItemRepository returnItemRepo,
             ReturnNoteRepository returnNoteRepo,
+            RefundRepository refundRepo,
             NotificationService notificationService
-    ) {
+    )
+    {
         this.billRepo = billRepo;
         this.itemRepo = itemRepo;
         this.stockRepo = stockRepo;
@@ -75,6 +77,7 @@ public class BillingService {
         this.billPriceOverrideRepo = billPriceOverrideRepo;
         this.returnItemRepo = returnItemRepo;
         this.returnNoteRepo = returnNoteRepo;
+        this.refundRepo = refundRepo;
         this.notificationService = notificationService;
     }
 
@@ -265,6 +268,7 @@ public class BillingService {
 
         Bill bill = billRepo.findById(billId)
                 .orElseThrow(() -> new RuntimeException("Bill not found"));
+        ensureNotClosed(bill);
 
         BigDecimal originalAmount = bill.getTotalAmount();
         BigDecimal overridden = request.getOverriddenAmount();
@@ -383,23 +387,22 @@ public class BillingService {
         // ✅ FINAL CORRECT VALUES
         res.setAmountPaid(amountPaid);
         res.setDueAmount(safeDue);
+        res.setState(bill.getState().name());
 
         return res;
     }
 
     /* =====================================================
-       READ — BILL ITEMS (UNCHANGED)
-       ===================================================== */
-    public List<BillItemResponse> getBillItems(UUID billId) {
+   READ — BILL ITEMS (DOMAIN ONLY)
+   ===================================================== */
+    public List<BillItem> getBillItems(UUID billId) {
 
         billRepo.findById(billId)
                 .orElseThrow(() -> new RuntimeException("Bill not found"));
 
-        return billItemRepo.findByBillId(billId)
-                .stream()
-                .map(BillItemResponse::from)
-                .toList();
+        return billItemRepo.findByBillId(billId);
     }
+
 
     /* =====================================================
        READ — LIST / SEARCH BILLS (UNCHANGED)
@@ -432,6 +435,7 @@ public class BillingService {
                     r.setTotalAmount(bill.getTotalAmount());
                     r.setPaidAmount(paid);
                     r.setDueAmount(due);
+                    r.setState(bill.getState().name());
 
                     return r;
                 })
@@ -470,7 +474,8 @@ public class BillingService {
                 bill.getDiscountAmount(),
                 bill.getTotalAmount(),
                 paid,
-                due
+                due,
+                bill.getState().name()
         );
     }
 
@@ -484,6 +489,10 @@ public class BillingService {
 
         Bill bill = billRepo.findById(billId)
                 .orElseThrow(() -> new RuntimeException("Bill not found"));
+        if (bill.getState() == BillState.ESTIMATE) {
+            throw new IllegalStateException("Cannot settle an estimate bill");
+        }
+        ensureNotClosed(bill);
 
         BigDecimal due = ledgerRepo.getDueForBill(billId);
 
@@ -538,5 +547,156 @@ public class BillingService {
         return "BILL-" +
                 today.format(DateTimeFormatter.BASIC_ISO_DATE) +
                 String.format("%02d", countToday);
+    }
+    /* =====================================================
+   CLOSE BILL (HARD FINALIZATION)
+   ===================================================== */
+    @Transactional
+    public void closeBill(UUID billId, User user) {
+
+        authService.requireOwner(user);
+
+        Bill bill = billRepo.findById(billId)
+                .orElseThrow(() -> new RuntimeException("Bill not found"));
+
+        if (bill.getState() == BillState.CLOSED) {
+            throw new IllegalStateException("Bill already closed");
+        }
+
+        // 1️⃣ Ledger must be settled
+        BigDecimal debit =
+                ledgerRepo.sumByBillAndType(billId, LedgerType.DEBIT);
+
+        BigDecimal credit =
+                ledgerRepo.sumByBillAndType(billId, LedgerType.CREDIT);
+
+        BigDecimal returnCredit =
+                ledgerRepo.sumByBillAndType(billId, LedgerType.RETURN_CREDIT);
+
+        BigDecimal adjustment =
+                ledgerRepo.sumByBillAndType(billId, LedgerType.ADJUSTMENT);
+
+        debit = debit == null ? BigDecimal.ZERO : debit;
+        credit = credit == null ? BigDecimal.ZERO : credit;
+        returnCredit = returnCredit == null ? BigDecimal.ZERO : returnCredit;
+        adjustment = adjustment == null ? BigDecimal.ZERO : adjustment;
+
+        BigDecimal netBalance =
+                debit.subtract(credit).subtract(returnCredit).subtract(adjustment);
+
+        if (netBalance.signum() != 0) {
+            throw new IllegalStateException("Bill cannot be closed: ledger not settled");
+        }
+
+        // 2️⃣ No pending fulfilments
+        boolean hasPendingFulfilments =
+                billItemRepo.findPendingFulfilments().stream()
+                        .anyMatch(bi -> bi.getBill().getId().equals(billId));
+
+        if (hasPendingFulfilments) {
+            throw new IllegalStateException("Bill cannot be closed: pending fulfilments exist");
+        }
+
+        // 3️⃣ All returns must be finalized
+        boolean hasUnfinalizedReturns =
+                returnNoteRepo.findByBill_Id(billId).stream()
+                        .anyMatch(rn -> !rn.isFinalized());
+
+        if (hasUnfinalizedReturns) {
+            throw new IllegalStateException("Bill cannot be closed: unfinalized returns exist");
+        }
+
+        bill.setState(BillState.CLOSED);
+        billRepo.save(bill);
+
+        auditService.log(
+                "BILL",
+                billId,
+                "CLOSE",
+                null,
+                "Bill closed",
+                user
+        );
+    }
+    /* =====================================================
+   BILL AUDIT (READ-ONLY, FULL CONSISTENCY VIEW)
+   ===================================================== */
+    @Transactional(readOnly = true)
+    public BillAuditResponse getBillAudit(UUID billId, User user) {
+
+        authService.requireBillingOrOwner(user);
+
+        Bill bill = billRepo.findById(billId)
+                .orElseThrow(() -> new RuntimeException("Bill not found"));
+
+        // =========================
+        /* LEDGER (SOURCE OF TRUTH) */
+// =========================
+        BigDecimal debit =
+                ledgerRepo.sumByBillAndType(billId, LedgerType.DEBIT);
+
+        BigDecimal credit =
+                ledgerRepo.sumByBillAndType(billId, LedgerType.CREDIT);
+
+        BigDecimal returnCredit =
+                ledgerRepo.sumByBillAndType(billId, LedgerType.RETURN_CREDIT);
+
+        BigDecimal adjustment =
+                ledgerRepo.sumByBillAndType(billId, LedgerType.ADJUSTMENT);
+
+        debit = debit == null ? BigDecimal.ZERO : debit;
+        credit = credit == null ? BigDecimal.ZERO : credit;
+        returnCredit = returnCredit == null ? BigDecimal.ZERO : returnCredit;
+        adjustment = adjustment == null ? BigDecimal.ZERO : adjustment;
+
+        BigDecimal netBalance =
+                debit.subtract(credit)
+                        .subtract(returnCredit)
+                        .subtract(adjustment);
+
+        // Goods
+        BigDecimal totalOrdered = billItemRepo.findByBillId(billId).stream()
+                .map(BillItem::getQuantity)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        BigDecimal totalFulfilled = billItemRepo.findByBillId(billId).stream()
+                .map(BillItem::getFulfilledQty)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        BigDecimal totalReturned = billItemRepo.findByBillId(billId).stream()
+                .map(bi -> returnItemRepo.getTotalReturnedQtyForBillItem(bi.getId()))
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        // Returns
+        Object agg = returnNoteRepo.getReturnAggregates(billId);
+        Object[] returnAgg = (Object[]) agg;
+
+        BigDecimal returnedGross = (BigDecimal) returnAgg[0];
+        BigDecimal returnedEffective = (BigDecimal) returnAgg[1];
+
+        // Refunds
+        BigDecimal refundedTotal =
+                refundRepo.sumRefundedAmountByBill(billId);
+
+        return new BillAuditResponse(
+                bill.getId(),
+                bill.getBillCode(),
+                bill.getState().name(),
+
+                debit,
+                credit,
+                returnCredit,
+                adjustment,
+                netBalance,
+
+                totalOrdered,
+                totalFulfilled,
+                totalReturned,
+
+                returnedGross,
+                returnedEffective,
+
+                refundedTotal
+        );
     }
 }

@@ -50,5 +50,20 @@ public interface ReturnNoteRepository extends JpaRepository<ReturnNote, UUID> {
 """)
     BigDecimal sumFinalizedReturnByBill(UUID billId);
 
+    @Query("""
+    SELECT
+        COALESCE(SUM(rn.returnedGrossAmount), 0),
+        COALESCE(SUM(rn.netReturnAmount), 0)
+    FROM ReturnNote rn
+    WHERE rn.bill.id = :billId
+""")
+    Object getReturnAggregates(UUID billId);
+
+    @Query("""
+    SELECT COALESCE(SUM(rn.netReturnAmount), 0)
+    FROM ReturnNote rn
+    WHERE rn.bill.id = :billId
+""")
+    BigDecimal sumNetReturnsByBill(UUID billId);
 
 }

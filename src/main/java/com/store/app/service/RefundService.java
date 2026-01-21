@@ -7,6 +7,7 @@ import com.store.app.entity.*;
 import com.store.app.repository.*;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.stereotype.Service;
+import static com.store.app.util.BillGuards.ensureActiveForOps;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -22,6 +23,7 @@ public class RefundService {
     private final BillPriceOverrideRepository billPriceOverrideRepo;
     private final AuthService authService;
     private final AuditService auditService;
+    private final ReturnNoteRepository returnNoteRepo;
 
     public RefundService(
             RefundRepository refundRepo,
@@ -29,6 +31,7 @@ public class RefundService {
             ReturnRepository returnRepo,
             ReturnItemRepository returnItemRepo,
             BillPriceOverrideRepository billPriceOverrideRepo,
+            ReturnNoteRepository returnNoteRepo,
             AuthService authService,
             AuditService auditService
     ) {
@@ -37,46 +40,60 @@ public class RefundService {
         this.returnRepo = returnRepo;
         this.returnItemRepo = returnItemRepo;
         this.billPriceOverrideRepo = billPriceOverrideRepo;
+        this.returnNoteRepo = returnNoteRepo;
         this.authService = authService;
         this.auditService = auditService;
     }
 
     /* =====================================================
-       💸 LEGACY REFUND — AGAINST BILL (DO NOT TOUCH)
+       💸 REFUND — UNIVERSAL (RETURN-CAPPED, TIMING SAFE)
        ===================================================== */
     @Transactional
-    public void processRefund(RefundRequest req, User user) {
+    public void processRefund(RefundRequest request, User user) {
 
         authService.requireOwner(user);
 
-        Bill bill = billRepo.findById(req.getBillId())
+        Bill bill = billRepo.findById(request.getBillId())
                 .orElseThrow(() -> new RuntimeException("Bill not found"));
+        ensureActiveForOps(bill);
 
-        BigDecimal amount = req.getAmount();
-        if (amount == null || amount.signum() <= 0) {
-            throw new RuntimeException("Refund amount must be positive");
+        BigDecimal finalizedReturnTotal =
+                returnNoteRepo.sumFinalizedReturnByBill(bill.getId());
+
+        if (finalizedReturnTotal == null) {
+            finalizedReturnTotal = BigDecimal.ZERO;
         }
 
-        BigDecimal alreadyRefunded =
-                refundRepo.sumRefundedAmountForBill(bill.getId());
+        BigDecimal refundedSoFar =
+                refundRepo.sumRefundedAmountByBillId(bill.getId());
 
-        if (alreadyRefunded == null) {
-            alreadyRefunded = BigDecimal.ZERO;
+        if (refundedSoFar == null) {
+            refundedSoFar = BigDecimal.ZERO;
         }
 
-        BigDecimal refundable =
-                bill.getTotalAmount().subtract(alreadyRefunded);
+        BigDecimal remainingRefund =
+                finalizedReturnTotal.subtract(refundedSoFar);
 
-        if (amount.compareTo(refundable) > 0) {
-            throw new RuntimeException("Refund exceeds refundable amount");
+        if (remainingRefund.signum() <= 0) {
+            throw new IllegalStateException("No refundable amount remaining");
+        }
+
+        if (request.getAmount() == null || request.getAmount().signum() <= 0) {
+            throw new IllegalStateException("Refund amount must be positive");
+        }
+
+        if (request.getAmount().compareTo(remainingRefund) > 0) {
+            throw new IllegalStateException(
+                    "Refund amount exceeds remaining refundable value"
+            );
         }
 
         Refund refund = new Refund();
         refund.setBill(bill);
         refund.setCustomer(bill.getCustomer());
-        refund.setAmount(amount);
-        refund.setRefundMode(req.getRefundMode());
-        refund.setReason(req.getReason());
+        refund.setAmount(request.getAmount());
+        refund.setRefundMode(request.getRefundMode());
+        refund.setReason(request.getReason());
         refund.setCreatedBy(user);
 
         refundRepo.save(refund);
@@ -86,7 +103,7 @@ public class RefundService {
                 bill.getId(),
                 "REFUND",
                 null,
-                "Refund ₹" + amount + " via " + req.getRefundMode(),
+                "Refund ₹" + request.getAmount() + " via " + request.getRefundMode(),
                 user
         );
     }
@@ -103,18 +120,34 @@ public class RefundService {
             throw new RuntimeException("Refund amount must be positive");
         }
 
-        Return ret = returnRepo.findById(req.getReturnId())
-                .orElseThrow(() -> new RuntimeException("Return not found"));
+        ReturnNote returnNote = returnNoteRepo.findById(req.getReturnNoteId())
+                .orElseThrow(() -> new RuntimeException("Return note not found"));
 
-        Customer customer = ret.getCustomer();
-        if (customer == null) {
-            throw new RuntimeException("Refund requires customer");
+        Bill bill = returnNote.getBill();
+        ensureActiveForOps(bill);
+
+        BigDecimal alreadyRefunded =
+                refundRepo.sumRefundedAmountByReturnNote(returnNote.getId());
+
+        if (alreadyRefunded == null) {
+            alreadyRefunded = BigDecimal.ZERO;
+        }
+
+        BigDecimal refundableRemaining =
+                returnNote.getNetReturnAmount().subtract(alreadyRefunded);
+
+        if (refundableRemaining.signum() <= 0) {
+            throw new IllegalStateException("No refundable amount remaining for this return");
+        }
+
+        if (req.getAmount().compareTo(refundableRemaining) > 0) {
+            throw new IllegalStateException("Refund exceeds return value");
         }
 
         Refund refund = new Refund();
-        refund.setReturnEntity(ret);
-        refund.setBill(ret.getBill());
-        refund.setCustomer(customer);
+        refund.setBill(bill);
+        refund.setReturnNote(returnNote); // 🔥 THIS FIXES YOUR ERROR
+        refund.setCustomer(bill.getCustomer());
         refund.setAmount(req.getAmount());
         refund.setRefundMode(req.getRefundMode());
         refund.setReason(req.getReason());
@@ -123,14 +156,15 @@ public class RefundService {
         refundRepo.save(refund);
 
         auditService.log(
+                "RETURN",
+                returnNote.getId(),
                 "REFUND",
-                refund.getId(),
-                "RETURN_REFUND",
                 null,
-                "Refund ₹" + req.getAmount() + " against Return " + ret.getId(),
+                "Refund ₹" + req.getAmount(),
                 user
         );
     }
+
 
     /* =====================================================
        🆕 TRUSTED INTERNAL REFUND (NO VALIDATION)

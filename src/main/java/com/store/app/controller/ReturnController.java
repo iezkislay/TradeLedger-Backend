@@ -1,17 +1,20 @@
 package com.store.app.controller;
 
-import com.store.app.dto.ApiResponse;
-import com.store.app.dto.CreateReturnNoteRequest;
-import com.store.app.dto.ReturnItemRequest;
+import com.store.app.dto.*;
+import com.store.app.entity.ReturnItem;
 import com.store.app.entity.ReturnNote;
 import com.store.app.entity.User;
+import com.store.app.repository.ReturnItemRepository;
+import com.store.app.repository.ReturnNoteRepository;
 import com.store.app.service.AuthService;
 import com.store.app.service.ReturnService;
-import com.store.app.repository.ReturnNoteRepository;
 import jakarta.servlet.http.HttpSession;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import com.store.app.repository.RefundRepository;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.List;
 import java.util.UUID;
 
@@ -21,15 +24,21 @@ public class ReturnController {
 
     private final ReturnService returnService;
     private final ReturnNoteRepository returnNoteRepo;
+    private final ReturnItemRepository returnItemRepo;
+    private final RefundRepository refundRepo;
     private final AuthService authService;
 
     public ReturnController(
             ReturnService returnService,
             ReturnNoteRepository returnNoteRepo,
+            ReturnItemRepository returnItemRepo,
+            RefundRepository refundRepo,
             AuthService authService
     ) {
         this.returnService = returnService;
         this.returnNoteRepo = returnNoteRepo;
+        this.returnItemRepo = returnItemRepo;
+        this.refundRepo = refundRepo;
         this.authService = authService;
     }
 
@@ -37,11 +46,6 @@ public class ReturnController {
        🆕 CREATE RETURN NOTE (STEP 1 — VALUATION ONLY)
        ===================================================== */
 
-    /**
-     * POST /api/returns
-     * Creates a return note with valuation
-     * (NO ledger, NO refund, NO settlement)
-     */
     @PostMapping
     public ResponseEntity<ApiResponse<UUID>> createReturnNote(
             @RequestBody CreateReturnNoteRequest request,
@@ -68,12 +72,6 @@ public class ReturnController {
        ✅ FINALIZE RETURN NOTE (STEP 2 — IDEMPOTENT)
        ===================================================== */
 
-    /**
-     * POST /api/returns/{returnNoteId}/finalize
-     * Applies:
-     * 1. Credit to bill due
-     * 2. Refund excess (if any)
-     */
     @PostMapping("/{returnNoteId}/finalize")
     public ResponseEntity<ApiResponse<String>> finalizeReturn(
             @PathVariable UUID returnNoteId,
@@ -94,13 +92,140 @@ public class ReturnController {
     }
 
     /* =====================================================
+       📦 RETURNS (GOODS MOVEMENT TRUTH — READ ONLY)
+       ===================================================== */
+
+    @GetMapping
+    public ResponseEntity<ApiResponse<GroupedReturnsResponse>> getReturns(
+            @RequestParam UUID billId,
+            HttpSession session
+    ) {
+        User user = authService.getCurrentUser(session);
+        if (user == null) {
+            throw new RuntimeException("User not logged in");
+        }
+
+        // =========================
+        // FETCH RETURN NOTES
+        // =========================
+        List<ReturnNote> notes =
+                returnNoteRepo.findByBill_Id(billId);
+
+        List<ReturnNoteView> returnViews = notes.stream().map(note -> {
+
+            // =========================
+            // ITEMS
+            // =========================
+            List<ReturnItem> items =
+                    returnItemRepo.findByReturnNote_Id(note.getId());
+
+            List<ReturnItemView> itemViews = items.stream().map(ri -> {
+
+                BigDecimal delivered =
+                        ri.getReturnedDeliveredQty() == null
+                                ? BigDecimal.ZERO
+                                : ri.getReturnedDeliveredQty();
+
+                BigDecimal pending =
+                        ri.getReturnedPendingQty() == null
+                                ? BigDecimal.ZERO
+                                : ri.getReturnedPendingQty();
+
+                BigDecimal qty = delivered.add(pending);
+                BigDecimal gross = qty.multiply(ri.getPrice());
+
+                BigDecimal effective =
+                        note.getReturnedGrossAmount().signum() == 0
+                                ? BigDecimal.ZERO
+                                : gross
+                                .multiply(note.getNetReturnAmount())
+                                .divide(
+                                        note.getReturnedGrossAmount(),
+                                        2,
+                                        RoundingMode.HALF_UP
+                                );
+
+                String returnType =
+                        delivered.signum() > 0 ? "DELIVERED" : "PENDING";
+
+                return new ReturnItemView(
+                        ri.getBillItem().getId(),
+                        ri.getItem().getItemCode(),
+                        ri.getItem().getName(),
+
+                        qty,
+                        gross,
+                        effective,
+
+                        returnType,
+                        ri.getCreatedAt()
+                );
+            }).toList();
+
+            // =========================
+            // REFUNDS
+            // =========================
+            BigDecimal alreadyRefunded =
+                    refundRepo.sumRefundedAmountByReturnNote(note.getId());
+
+            if (alreadyRefunded == null) {
+                alreadyRefunded = BigDecimal.ZERO;
+            }
+
+            BigDecimal refundableRemaining =
+                    note.getNetReturnAmount().subtract(alreadyRefunded);
+
+            if (refundableRemaining.signum() < 0) {
+                refundableRemaining = BigDecimal.ZERO;
+            }
+
+            return new ReturnNoteView(
+                    note.getId(),
+                    note.isFinalized(),
+
+                    note.getReturnedGrossAmount(),
+                    note.getNetReturnAmount(),
+
+                    alreadyRefunded,
+                    refundableRemaining,
+
+                    note.isResidualAdjusted(),      // ✅
+                    note.getAdjustmentNote(),
+
+                    itemViews
+            );
+        }).toList();
+
+        // =========================
+        // AGGREGATES (UNCHANGED)
+        // =========================
+        Object[] totals =
+                (Object[]) returnNoteRepo.getReturnAggregates(billId);
+
+        BigDecimal returnedGrossTotal =
+                (BigDecimal) totals[0];
+
+        BigDecimal returnedEffectiveTotal =
+                (BigDecimal) totals[1];
+
+        return ResponseEntity.ok(
+                new ApiResponse<>(
+                        true,
+                        new GroupedReturnsResponse(
+                                returnViews,
+                                returnedGrossTotal,
+                                returnedEffectiveTotal
+                        ),
+                        "Returns fetched"
+                )
+        );
+    }
+
+
+    /* =====================================================
        🧱 HARDENING LAYER 4 — CONTROLLER GUARD (FUTURE USE)
        ===================================================== */
 
-    /**
-     * Example guard for future update/delete APIs
-     * (DO NOT expose mutations after finalization)
-     */
     private ResponseEntity<ApiResponse<?>> rejectIfFinalized(UUID returnNoteId) {
 
         ReturnNote note = returnNoteRepo.findById(returnNoteId)
@@ -116,6 +241,6 @@ public class ReturnController {
             );
         }
 
-        return null; // caller proceeds
+        return null;
     }
 }

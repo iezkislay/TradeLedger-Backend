@@ -7,6 +7,7 @@ import org.springframework.data.repository.query.Param;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.List;
 import java.util.UUID;
 
 public interface RefundRepository extends JpaRepository<Refund, UUID> {
@@ -67,4 +68,27 @@ public interface RefundRepository extends JpaRepository<Refund, UUID> {
         WHERE DATE(r.createdAt) = :date
     """)
     BigDecimal todayRefunds(@Param("date") LocalDate date);
+
+    @Query("""
+        SELECT r
+        FROM Refund r
+        WHERE r.bill.id = :billId
+        ORDER BY r.createdAt ASC
+    """)
+    List<Refund> findAllByBillId(UUID billId);
+
+    @Query("""
+    SELECT COALESCE(SUM(r.amount), 0)
+    FROM Refund r
+    WHERE r.returnNote.id = :returnNoteId
+""")
+    BigDecimal sumRefundedAmountByReturnNote(UUID returnNoteId);
+
+    @Query("""
+    SELECT COALESCE(SUM(r.amount), 0)
+    FROM Refund r
+    WHERE r.returnNote.id = :returnNoteId
+""")
+    BigDecimal sumRefundedAmountByReturnNoteId(UUID returnNoteId);
+
 }

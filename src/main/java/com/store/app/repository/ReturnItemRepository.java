@@ -85,4 +85,14 @@ public interface ReturnItemRepository extends JpaRepository<ReturnItem, UUID> {
         WHERE ri.billItem.id = :billItemId
     """)
     BigDecimal getTotalReturnedPendingQtyForBillItem(UUID billItemId);
+
+    @Query("""
+    SELECT ri
+    FROM ReturnItem ri
+    JOIN ri.returnNote rn
+    WHERE rn.bill.id = :billId
+    ORDER BY ri.createdAt ASC
+""")
+    List<ReturnItem> findAllByBillIdOrdered(UUID billId);
+
 }

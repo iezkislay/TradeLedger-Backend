@@ -2,6 +2,7 @@ package com.store.app.repository;
 
 import com.store.app.entity.CustomerLedger;
 import com.store.app.dto.CustomerBalanceView;
+import com.store.app.enums.LedgerType;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -240,4 +241,43 @@ public interface CustomerLedgerRepository
         GROUP BY cl.customer.id
     """)
     List<Object[]> findLastTxnDates();
+
+    @Query("""
+        SELECT COALESCE(SUM(cl.amount), 0)
+        FROM CustomerLedger cl
+        WHERE cl.bill.id = :billId
+          AND cl.entryType = :type
+    """)
+    BigDecimal sumByBillAndType(UUID billId, LedgerType type);
+
+    @Query("""
+    SELECT
+        COALESCE(SUM(
+            CASE
+                WHEN cl.entryType = 'DEBIT' THEN cl.amount
+                WHEN cl.entryType IN ('CREDIT', 'RETURN_CREDIT', 'ADJUSTMENT')
+                    THEN -cl.amount
+                ELSE 0
+            END
+        ), 0)
+    FROM CustomerLedger cl
+    WHERE cl.bill.id = :billId
+""")
+    BigDecimal netBalanceByBill(@Param("billId") UUID billId);
+
+    @Query("""
+    SELECT COALESCE(
+        SUM(
+            CASE
+                WHEN entryType = 'DEBIT' THEN amount
+                ELSE -amount
+            END
+        ), 0
+    )
+    FROM CustomerLedger
+    WHERE bill.id = :billId
+""")
+    BigDecimal getCustomerBalance(@Param("billId") UUID billId);
+
+
 }

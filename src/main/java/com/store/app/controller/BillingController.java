@@ -1,7 +1,7 @@
 package com.store.app.controller;
 
 import com.store.app.dto.ApiResponse;
-import com.store.app.dto.BillItemResponse;
+import com.store.app.dto.BillAuditResponse;
 import com.store.app.dto.BillListResponse;
 import com.store.app.dto.BillOverrideRequest;
 import com.store.app.dto.BillPrintResponse;
@@ -97,28 +97,6 @@ public class BillingController {
     }
 
     // =====================================================
-    // 📦 GET BILL ITEMS (READ-ONLY, SAFE)
-    // =====================================================
-    @GetMapping("/{billId}/items")
-    public ResponseEntity<ApiResponse<List<BillItemResponse>>> getBillItems(
-            @PathVariable UUID billId,
-            HttpSession session
-    ) {
-        User user = authService.getCurrentUser(session);
-        if (user == null) {
-            throw new RuntimeException("User not logged in");
-        }
-
-        return ResponseEntity.ok(
-                new ApiResponse<>(
-                        true,
-                        billingService.getBillItems(billId),
-                        "Bill items loaded"
-                )
-        );
-    }
-
-    // =====================================================
     // 🖨️ PRINT BILL (READ-ONLY, ROLE PROTECTED)
     // =====================================================
     @GetMapping("/{id}/print")
@@ -169,6 +147,48 @@ public class BillingController {
 
         return ResponseEntity.ok(
                 new ApiResponse<>(true, "OK", "Bill overridden successfully")
+        );
+    }
+
+    // =====================================================
+    // 🔒 CLOSE BILL (FINAL)
+    // =====================================================
+    @PostMapping("/{billId}/close")
+    public ResponseEntity<ApiResponse<String>> closeBill(
+            @PathVariable UUID billId,
+            HttpSession session
+    ) {
+        User user = authService.getCurrentUser(session);
+        if (user == null) {
+            throw new RuntimeException("User not logged in");
+        }
+
+        billingService.closeBill(billId, user);
+
+        return ResponseEntity.ok(
+                new ApiResponse<>(true, "OK", "Bill closed successfully")
+        );
+    }
+
+    // =====================================================
+    // 📜 BILL AUDIT (READ-ONLY)
+    // =====================================================
+    @GetMapping("/{billId}/audit")
+    public ResponseEntity<ApiResponse<BillAuditResponse>> audit(
+            @PathVariable UUID billId,
+            HttpSession session
+    ) {
+        User user = authService.getCurrentUser(session);
+        if (user == null) {
+            throw new RuntimeException("User not logged in");
+        }
+
+        return ResponseEntity.ok(
+                new ApiResponse<>(
+                        true,
+                        billingService.getBillAudit(billId, user),
+                        "Bill audit loaded"
+                )
         );
     }
 }

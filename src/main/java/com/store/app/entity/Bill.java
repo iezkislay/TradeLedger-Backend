@@ -4,6 +4,7 @@ import com.fasterxml.jackson.annotation.JsonManagedReference;
 import com.store.app.enums.PaymentType;
 import jakarta.persistence.*;
 import lombok.*;
+import com.store.app.enums.BillState;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -48,6 +49,11 @@ public class Bill {
     @Column(nullable = false)
     private BigDecimal discountAmount = BigDecimal.ZERO;
 
+    // Bill State
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false)
+    private BillState state = BillState.ACTIVE;
+
     /**
      * Final payable amount after discount
      */
@@ -66,4 +72,18 @@ public class Bill {
     @OneToMany(mappedBy = "bill", fetch = FetchType.EAGER, cascade = CascadeType.ALL)
     @JsonManagedReference
     private List<BillItem> items = new ArrayList<>();
+
+    // Helper Methods
+    public boolean isEstimate() {
+        return state == BillState.ESTIMATE;
+    }
+
+    public boolean isActive() {
+        return state == BillState.ACTIVE;
+    }
+
+    public boolean isClosed() {
+        return state == BillState.CLOSED;
+    }
+
 }

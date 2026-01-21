@@ -12,6 +12,7 @@ import java.util.UUID;
 public class CreateRefundRequest {
 
     private UUID returnId;
+    private UUID returnNoteId;
     private BigDecimal amount;
     private RefundMode refundMode;
     private String reason;

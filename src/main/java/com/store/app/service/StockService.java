@@ -106,7 +106,7 @@ public class StockService {
         txn.setItem(item);
         txn.setTransactionType(StockTxnType.ADJUST);
         txn.setQuantity(request.getQuantity().abs());
-        txn.setReferenceType(ReferenceType.ADJUSTMENT);
+        txn.setReferenceType(ReferenceType.MANUAL);
         txn.setReferenceId(null);
 
         stockTxnRepo.save(txn);
@@ -167,7 +167,7 @@ public class StockService {
         txn.setItem(item);
         txn.setTransactionType(StockTxnType.ADJUST);
         txn.setQuantity(request.getQuantity().abs());
-        txn.setReferenceType(ReferenceType.ADJUSTMENT);
+        txn.setReferenceType(ReferenceType.MANUAL);
         txn.setReferenceId(null);
 
         stockTxnRepo.save(txn);

@@ -45,4 +45,8 @@ public class CustomerLedger {
 
     @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt = LocalDateTime.now();
+
+    @Column(length = 255)
+    private String reason;
+
 }
