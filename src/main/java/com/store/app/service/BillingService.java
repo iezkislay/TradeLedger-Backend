@@ -43,6 +43,7 @@ public class BillingService {
 
     @Getter
     private final NotificationService notificationService;
+    private LocalDateTime now;
 
     public BillingService(
             BillRepository billRepo,
@@ -80,6 +81,7 @@ public class BillingService {
         this.refundRepo = refundRepo;
         this.notificationService = notificationService;
     }
+
 
     /* =====================================================
        CREATE BILL — UNCHANGED
@@ -489,8 +491,9 @@ public class BillingService {
 
         Bill bill = billRepo.findById(billId)
                 .orElseThrow(() -> new RuntimeException("Bill not found"));
-        if (bill.getState() == BillState.ESTIMATE) {
-            throw new IllegalStateException("Cannot settle an estimate bill");
+        if (bill.getState() == BillState.ESTIMATE
+                || bill.getState() == BillState.CANCELLED) {
+            throw new IllegalStateException("Operation not allowed for this bill state");
         }
         ensureNotClosed(bill);
 
@@ -563,6 +566,14 @@ public class BillingService {
             throw new IllegalStateException("Bill already closed");
         }
 
+        if (bill.getState() == BillState.ESTIMATE) {
+            throw new IllegalStateException("Estimate bill cannot be closed");
+        }
+
+        if (bill.getState() == BillState.CANCELLED) {
+            throw new IllegalStateException("Bill is cancelled");
+        }
+
         // 1️⃣ Ledger must be settled
         BigDecimal debit =
                 ledgerRepo.sumByBillAndType(billId, LedgerType.DEBIT);
@@ -607,6 +618,7 @@ public class BillingService {
         }
 
         bill.setState(BillState.CLOSED);
+        bill.setClosedAt(LocalDateTime.now());
         billRepo.save(bill);
 
         auditService.log(
@@ -699,4 +711,278 @@ public class BillingService {
                 refundedTotal
         );
     }
+
+    // =====================================================
+    // 📜 Create ESTIMATE Bill
+    // =====================================================
+
+    @Transactional
+    public Bill createEstimate(CreateBillRequest req, User user) {
+
+        authService.requireBillingOrOwner(user);
+        validationService.validateBillItems(req.getItems());
+
+    /* =====================================================
+       1️⃣ CALCULATE TOTALS (NO PAYMENT / NO LEDGER)
+       ===================================================== */
+
+        BigDecimal subtotal = BigDecimal.ZERO;
+        for (BillItemRequest i : req.getItems()) {
+            subtotal = subtotal.add(i.getQuantity().multiply(i.getPrice()));
+        }
+
+        BigDecimal discount =
+                req.getDiscountAmount() != null ? req.getDiscountAmount() : BigDecimal.ZERO;
+
+        if (discount.signum() < 0 || discount.compareTo(subtotal) > 0) {
+            throw new RuntimeException("Invalid discount");
+        }
+
+        BigDecimal finalAmount = subtotal.subtract(discount);
+
+    /* =====================================================
+       2️⃣ RESOLVE CUSTOMER (SAME AS createBill, NO PAYMENT)
+       ===================================================== */
+
+        Customer customer = null;
+
+        // Case 1: existing customer selected
+        if (req.getCustomerId() != null) {
+            customer = customerRepo.findById(req.getCustomerId())
+                    .orElseThrow(() -> new RuntimeException("Customer not found"));
+        }
+
+        // Case 2: customer details entered manually
+        if (customer == null
+                && req.getCustomerName() != null
+                && !req.getCustomerName().isBlank()
+                && req.getCustomerMobile() != null
+                && !req.getCustomerMobile().isBlank()) {
+
+            customer = customerService.createCustomer(
+                    req.getCustomerName().trim(),
+                    req.getCustomerMobile().trim(),
+                    req.getCustomerAddress()
+            );
+        }
+
+    /* =====================================================
+       3️⃣ CREATE ESTIMATE BILL (NUMBERING FIX APPLIED)
+       ===================================================== */
+
+        Bill bill = new Bill();
+        bill.setBillNumber(generateBillNumber());
+        bill.setBillCode(generateBillCode());
+//        bill.setBillNumber(generateEstimateSequence()); // ✅ EST-0001
+//        bill.setBillCode(generateEstimateCode());       // ✅ EST-YYYYMMDDXX
+        bill.setPaymentType(PaymentType.ESTIMATE);
+        bill.setState(BillState.ESTIMATE);
+
+        bill.setCustomer(customer);
+        bill.setCreatedBy(user);
+        bill.setSubtotal(subtotal);
+        bill.setDiscountAmount(discount);
+        bill.setTotalAmount(finalAmount);
+
+        billRepo.save(bill);
+
+    /* =====================================================
+       4️⃣ ATTACH ITEMS (NO STOCK MOVEMENT)
+       ===================================================== */
+
+        for (BillItemRequest itemReq : req.getItems()) {
+
+            Item item = itemRepo.findById(itemReq.getItemId())
+                    .orElseThrow(() -> new RuntimeException("Item not found"));
+
+            validationService.validateQuantity(item.getBaseUnit(), itemReq.getQuantity());
+            validationService.validatePrice(itemReq.getPrice(), item.getCostPrice());
+
+            BillItem bi = new BillItem();
+            bi.setBill(bill);
+            bi.setItem(item);
+            bi.setQuantity(itemReq.getQuantity());
+            bi.setPrice(itemReq.getPrice());
+            bi.setAmount(itemReq.getPrice().multiply(itemReq.getQuantity()));
+
+            bi.setFulfilledQty(BigDecimal.ZERO);
+            bi.setPendingQty(itemReq.getQuantity());
+            bi.setFulfilmentStatus("ESTIMATE");
+
+            bill.getItems().add(bi);
+        }
+
+    /* =====================================================
+       5️⃣ AUDIT
+       ===================================================== */
+
+        auditService.log(
+                "BILL",
+                bill.getId(),
+                "CREATE_ESTIMATE",
+                null,
+                finalAmount.toString(),
+                user
+        );
+
+    /* =====================================================
+       6️⃣ WHATSAPP (DEFENSIVE — NO CRASH)
+       ===================================================== */
+
+        if (bill.getCustomer() != null && bill.getCustomer().getMobile() != null) {
+            notificationService.sendWhatsApp(
+                    bill.getCustomer().getMobile(),
+                    WhatsAppTemplates.estimate(bill)
+            );
+        }
+
+        return bill;
+    }
+
+    /* =====================================================
+   🔥 ACTIVATE ESTIMATE → ACTIVE
+   ===================================================== */
+    @Transactional
+    public Bill activateEstimate(
+            UUID billId,
+            PaymentType paymentType,
+            BigDecimal amountPaid,
+            User user
+    ) {
+
+        Bill bill = billRepo.findById(billId)
+                .orElseThrow(() -> new RuntimeException("Bill not found"));
+
+        if (bill.getState() != BillState.ESTIMATE) {
+            throw new RuntimeException("Only ESTIMATE bills can be activated");
+        }
+
+        // 🔁 Re-run validations
+        validationService.validateBillItems(
+                bill.getItems().stream()
+                        .map(bi -> {
+                            BillItemRequest r = new BillItemRequest();
+                            r.setItemId(bi.getItem().getId());
+                            r.setQuantity(bi.getQuantity());
+                            r.setPrice(bi.getPrice());
+                            return r;
+                        })
+                        .toList()
+        );
+
+        // 🔢 Assign official numbers NOW
+        bill.setPaymentType(paymentType);
+        bill.setState(BillState.ACTIVE);
+        bill.setActivatedAt(LocalDateTime.now());
+
+        BigDecimal finalAmount = bill.getTotalAmount();
+
+        if (amountPaid.signum() < 0 || amountPaid.compareTo(finalAmount) > 0) {
+            throw new RuntimeException("Invalid paid amount");
+        }
+
+        BigDecimal dueAmount = finalAmount.subtract(amountPaid);
+
+        // 📦 Fulfil stock NOW
+        fulfilStockAndCreateTransactions(bill);
+
+        // 💰 Ledger NOW
+        if (paymentType == PaymentType.CREDIT) {
+
+            CustomerLedger debit = new CustomerLedger();
+            debit.setCustomer(bill.getCustomer());
+            debit.setBill(bill);
+            debit.setEntryType(LedgerType.DEBIT);
+            debit.setReferenceType(ReferenceType.BILL);
+            debit.setAmount(finalAmount);
+            ledgerRepo.save(debit);
+
+            if (amountPaid.signum() > 0) {
+                CustomerLedger credit = new CustomerLedger();
+                credit.setCustomer(bill.getCustomer());
+                credit.setBill(bill);
+                credit.setEntryType(LedgerType.CREDIT);
+                credit.setReferenceType(ReferenceType.PAYMENT);
+                credit.setAmount(amountPaid);
+                ledgerRepo.save(credit);
+            }
+        }
+
+        auditService.log(
+                "BILL",
+                bill.getId(),
+                "ACTIVATE_BILL",
+                "ESTIMATE",
+                "ACTIVE",
+                user
+        );
+
+        notificationService.sendWhatsApp(
+                bill.getCustomer().getMobile(),
+                WhatsAppTemplates.billCreated(bill)
+        );
+
+        return bill;
+    }
+
+    private void fulfilStockAndCreateTransactions(Bill bill) {
+        for (BillItem bi : bill.getItems()) {
+
+            Stock stock = stockRepo.findById(bi.getItem().getId())
+                    .orElseThrow(() -> new RuntimeException("Stock not found"));
+
+            BigDecimal fulfilled = stock.getQuantity().min(bi.getQuantity());
+            BigDecimal pending = bi.getQuantity().subtract(fulfilled);
+
+            bi.setFulfilledQty(fulfilled);
+            bi.setPendingQty(pending);
+
+            bi.setFulfilmentStatus(
+                    pending.signum() == 0 ? "FULL"
+                            : fulfilled.signum() == 0 ? "PENDING"
+                            : "PARTIAL"
+            );
+
+            if (fulfilled.signum() > 0) {
+                stock.setQuantity(stock.getQuantity().subtract(fulfilled));
+                stockRepo.save(stock);
+
+                StockTransaction txn = new StockTransaction();
+                txn.setItem(bi.getItem());
+                txn.setTransactionType(StockTxnType.OUT);
+                txn.setQuantity(fulfilled);
+                txn.setReferenceType(ReferenceType.BILL);
+                txn.setReferenceId(bill.getId());
+                stockTxnRepo.save(txn);
+            }
+        }
+    }
+
+    @Transactional
+    public void cancelEstimate(UUID billId, User user) {
+
+        authService.requireBillingOrOwner(user);
+
+        Bill bill = billRepo.findById(billId)
+                .orElseThrow(() -> new RuntimeException("Bill not found"));
+
+        if (bill.getState() != BillState.ESTIMATE) {
+            throw new IllegalStateException("Only ESTIMATE bills can be cancelled");
+        }
+
+        bill.setState(BillState.CANCELLED);
+        bill.setCancelledAt(LocalDateTime.now());
+
+        billRepo.save(bill);
+
+        auditService.log(
+                "BILL",
+                billId,
+                "CANCEL_ESTIMATE",
+                "ESTIMATE",
+                "CANCELLED",
+                user
+        );
+    }
+
 }

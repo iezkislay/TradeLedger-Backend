@@ -1,6 +1,7 @@
 package com.store.app.service;
 
 import com.store.app.entity.*;
+import com.store.app.enums.BillState;
 import com.store.app.enums.ReferenceType;
 import com.store.app.enums.StockTxnType;
 import com.store.app.repository.BillItemRepository;
@@ -55,6 +56,11 @@ public class FulfilmentService {
                 .orElseThrow(() -> new RuntimeException("Bill item not found"));
 
         Bill bill = bi.getBill();
+        // 🔒 GUARD
+        if (bill.getState() == BillState.ESTIMATE
+                || bill.getState() == BillState.CANCELLED) {
+            throw new IllegalStateException("Fulfilment not allowed for this bill state");
+        }
         ensureActiveForOps(bill);
 
 

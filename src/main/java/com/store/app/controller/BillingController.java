@@ -1,15 +1,9 @@
 package com.store.app.controller;
 
-import com.store.app.dto.ApiResponse;
-import com.store.app.dto.BillAuditResponse;
-import com.store.app.dto.BillListResponse;
-import com.store.app.dto.BillOverrideRequest;
-import com.store.app.dto.BillPrintResponse;
-import com.store.app.dto.BillResponse;
-import com.store.app.dto.CreateBillRequest;
-import com.store.app.dto.SettleBillRequest;
+import com.store.app.dto.*;
 import com.store.app.entity.Bill;
 import com.store.app.entity.User;
+import com.store.app.dto.ActivateBillRequest;
 import com.store.app.service.AuthService;
 import com.store.app.service.BillingService;
 import jakarta.servlet.http.HttpSession;
@@ -189,6 +183,68 @@ public class BillingController {
                         billingService.getBillAudit(billId, user),
                         "Bill audit loaded"
                 )
+        );
+    }
+
+    // =====================================================
+    // 📜 Create ESTIMATE Bill
+    // =====================================================
+
+    @PostMapping("/estimate")
+    public ResponseEntity<ApiResponse<Bill>> createEstimate(
+            @RequestBody CreateBillRequest request,
+            HttpSession session
+    ) {
+        User user = authService.getCurrentUser(session);
+        authService.requireBillingOrOwner(user);
+
+        Bill bill = billingService.createEstimate(request, user);
+
+        return ResponseEntity.ok(
+                new ApiResponse<>(true, bill, "Estimate created")
+        );
+    }
+
+    // =====================================================
+    // 📜 Activate ESTIMATE → ACTIVE
+    // =====================================================
+
+    @PostMapping("/{billId}/activate")
+    public ResponseEntity<ApiResponse<String>> activateEstimate(
+            @PathVariable UUID billId,
+            @RequestBody ActivateBillRequest req,
+            HttpSession session
+    ) {
+        User user = authService.getCurrentUser(session);
+        authService.requireBillingOrOwner(user);
+
+        billingService.activateEstimate(
+                billId,
+                req.getPaymentType(),
+                req.getAmountPaid(),
+                user
+        );
+
+        return ResponseEntity.ok(
+                new ApiResponse<>(true, "OK", "Bill activated")
+        );
+    }
+
+    // =====================================================
+    // ❌ CANCEL ESTIMATE
+    // =====================================================
+    @PostMapping("/{billId}/cancel")
+    public ResponseEntity<ApiResponse<String>> cancelEstimate(
+            @PathVariable UUID billId,
+            HttpSession session
+    ) {
+        User user = authService.getCurrentUser(session);
+        authService.requireBillingOrOwner(user);
+
+        billingService.cancelEstimate(billId, user);
+
+        return ResponseEntity.ok(
+                new ApiResponse<>(true, "OK", "Estimate cancelled")
         );
     }
 }

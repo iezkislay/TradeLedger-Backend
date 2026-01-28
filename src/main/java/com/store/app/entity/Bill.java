@@ -54,6 +54,10 @@ public class Bill {
     @Column(nullable = false)
     private BillState state = BillState.ACTIVE;
 
+    private LocalDateTime activatedAt;
+    private LocalDateTime closedAt;
+    private LocalDateTime cancelledAt;
+
     /**
      * Final payable amount after discount
      */
@@ -84,6 +88,10 @@ public class Bill {
 
     public boolean isClosed() {
         return state == BillState.CLOSED;
+    }
+
+    public boolean isCancelled() {
+        return state == BillState.CANCELLED;
     }
 
 }

@@ -19,6 +19,24 @@ public class WhatsAppTemplates {
         );
     }
 
+    public static String estimate(Bill bill) {
+        return """
+        📄 *Estimate from Puja Hardware*
+
+        Estimate No: %s
+        Date: %s
+        Amount: ₹%s
+
+        This is only a price estimate.
+        Final bill will be generated after confirmation.
+        """.formatted(
+                bill.getBillNumber(),
+                bill.getCreatedAt().toLocalDate(),
+                bill.getTotalAmount()
+        );
+    }
+
+
     public static String pendingItems(Bill bill) {
         return """
         ⏳ *Pending Items Reminder*

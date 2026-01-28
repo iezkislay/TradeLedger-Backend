@@ -1,6 +1,7 @@
 package com.store.app.repository;
 
 import com.store.app.entity.Bill;
+import com.store.app.enums.BillState;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 
@@ -20,6 +21,13 @@ public interface BillRepository extends JpaRepository<Bill, UUID> {
 
     // 🔢 Used for daily bill number generation
     long countByCreatedAtBetween(
+            LocalDateTime start,
+            LocalDateTime end
+    );
+
+    // 🔢 Used for daily ESTIMATE number generation (Phase 3.5)
+    long countByStateAndCreatedAtBetween(
+            BillState state,
             LocalDateTime start,
             LocalDateTime end
     );

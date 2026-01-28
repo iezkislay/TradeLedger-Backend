@@ -4,6 +4,7 @@ import com.store.app.dto.RefundRequest;
 import com.store.app.dto.CreateRefundRequest;
 import com.store.app.dto.BillSummaryResponse;
 import com.store.app.entity.*;
+import com.store.app.enums.BillState;
 import com.store.app.repository.*;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.stereotype.Service;
@@ -55,6 +56,11 @@ public class RefundService {
 
         Bill bill = billRepo.findById(request.getBillId())
                 .orElseThrow(() -> new RuntimeException("Bill not found"));
+        // 🔒 GUARD
+        if (bill.getState() == BillState.ESTIMATE
+                || bill.getState() == BillState.CANCELLED) {
+            throw new IllegalStateException("Refund not allowed for this bill state");
+        }
         ensureActiveForOps(bill);
 
         BigDecimal finalizedReturnTotal =
@@ -124,6 +130,11 @@ public class RefundService {
                 .orElseThrow(() -> new RuntimeException("Return note not found"));
 
         Bill bill = returnNote.getBill();
+        // 🔒 GUARD
+        if (bill.getState() == BillState.ESTIMATE
+                || bill.getState() == BillState.CANCELLED) {
+            throw new IllegalStateException("Refund not allowed for this bill state");
+        }
         ensureActiveForOps(bill);
 
         BigDecimal alreadyRefunded =
@@ -237,6 +248,11 @@ public class RefundService {
 
         Bill bill = billRepo.findById(billId)
                 .orElseThrow(() -> new RuntimeException("Bill not found"));
+        // 🔒 GUARD
+        if (bill.getState() == BillState.ESTIMATE
+                || bill.getState() == BillState.CANCELLED) {
+            throw new IllegalStateException("Refund not allowed for this bill state");
+        }
 
         Refund refund = new Refund();
         refund.setBill(bill);

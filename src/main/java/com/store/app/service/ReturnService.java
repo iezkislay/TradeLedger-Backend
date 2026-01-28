@@ -2,12 +2,7 @@ package com.store.app.service;
 
 import com.store.app.dto.ReturnItemRequest;
 import com.store.app.entity.*;
-import com.store.app.enums.PaymentType;
-import com.store.app.enums.LedgerType;
-import com.store.app.enums.ReferenceType;
-import com.store.app.enums.ReturnSource;
-import com.store.app.enums.StockTxnType;
-import com.store.app.enums.RefundMode;
+import com.store.app.enums.*;
 import com.store.app.repository.*;
 import jakarta.transaction.Transactional;
 import org.springframework.stereotype.Service;
@@ -85,6 +80,13 @@ public class ReturnService {
 
             if (bill == null) {
                 bill = billItem.getBill();
+                // 🔒 GUARD — NEW (REQUIRED)
+                if (bill.getState() == BillState.ESTIMATE
+                        || bill.getState() == BillState.CANCELLED) {
+                    throw new IllegalStateException(
+                            "Returns not allowed for this bill state"
+                    );
+                }
                 ensureActiveForOps(bill);
                 note.setBill(bill);
                 returnNoteRepo.save(note); // needed for FK usage
@@ -250,6 +252,11 @@ public class ReturnService {
         }
 
         Bill bill = note.getBill();
+        // 🔒 GUARD
+        if (bill.getState() == BillState.ESTIMATE
+                || bill.getState() == BillState.CANCELLED) {
+            throw new IllegalStateException("Cannot finalize return for this bill state");
+        }
         ensureActiveForOps(bill);
 
         BigDecimal effectiveReturn = note.getNetReturnAmount();
