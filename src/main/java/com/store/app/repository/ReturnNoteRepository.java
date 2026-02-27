@@ -15,6 +15,7 @@ public interface ReturnNoteRepository extends JpaRepository<ReturnNote, UUID> {
        ===================================================== */
 
     List<ReturnNote> findByBill_Id(UUID billId);
+    List<ReturnNote> findByBill_IdOrderByCreatedAtAsc(UUID billId);
 
     /* =====================================================
        🆕 FINALIZED NET RETURN (EXCLUDING CURRENT NOTE)

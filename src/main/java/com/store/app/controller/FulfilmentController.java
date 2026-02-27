@@ -12,6 +12,7 @@ import com.store.app.service.FulfilmentService;
 import jakarta.servlet.http.HttpSession;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import com.store.app.dto.PendingFulfilmentBillGroupView;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -63,9 +64,9 @@ public class FulfilmentController {
         );
     }
 
-    // 📊 Pending fulfilment report (OWNER / BILLING)
+    // 📊 Pending fulfilment (OWNER / BILLING)
     @GetMapping("/pending")
-    public ResponseEntity<ApiResponse<List<BillItem>>> pending(
+    public ResponseEntity<ApiResponse<List<PendingFulfilmentBillGroupView>>> pending(
             HttpSession session
     ) {
         User user = authService.getCurrentUser(session);
@@ -76,7 +77,7 @@ public class FulfilmentController {
         return ResponseEntity.ok(
                 new ApiResponse<>(
                         true,
-                        fulfilmentService.getPendingFulfilments(),
+                        fulfilmentService.getPendingGrouped(),
                         "Pending fulfilments fetched"
                 )
         );

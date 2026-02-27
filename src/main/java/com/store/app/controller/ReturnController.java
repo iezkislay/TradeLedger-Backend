@@ -91,6 +91,21 @@ public class ReturnController {
         );
     }
 
+    // PRINT RETURN
+    @GetMapping("/{id}/print")
+    public ResponseEntity<ReturnPrintResponse> printReturn(
+            @PathVariable UUID id,
+            HttpSession session
+    ) {
+
+        User user = authService.getCurrentUser(session);
+        authService.requireBillingOrOwner(user);
+
+        return ResponseEntity.ok(
+                returnService.getReturnForPrint(id)
+        );
+    }
+
     /* =====================================================
        📦 RETURNS (GOODS MOVEMENT TRUTH — READ ONLY)
        ===================================================== */

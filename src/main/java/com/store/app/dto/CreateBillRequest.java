@@ -61,8 +61,6 @@ public class CreateBillRequest {
      */
     private BigDecimal amountPaid;
 
-    /* =========================
-       GETTERS / SETTERS
-       ========================= */
+    private UUID workOrderId;
 
 }

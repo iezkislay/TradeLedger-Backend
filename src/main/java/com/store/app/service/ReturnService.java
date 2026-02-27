@@ -6,6 +6,7 @@ import com.store.app.enums.*;
 import com.store.app.repository.*;
 import jakarta.transaction.Transactional;
 import org.springframework.stereotype.Service;
+import com.store.app.dto.ReturnPrintResponse;
 import static com.store.app.util.BillGuards.ensureActiveForOps;
 
 
@@ -330,5 +331,95 @@ public class ReturnService {
         note.setFinalizedAt(LocalDateTime.now());
 
         returnNoteRepo.save(note);
+    }
+    /* =====================================================
+   STEP 3 — PRINT RETURN (READ-ONLY SAFE)
+   ===================================================== */
+    public ReturnPrintResponse getReturnForPrint(UUID returnNoteId) {
+
+        ReturnNote note = returnNoteRepo.findById(returnNoteId)
+                .orElseThrow(() -> new RuntimeException("Return note not found"));
+
+        Bill bill = note.getBill();
+
+        // ==================================
+        // 🔢 Generate Return Number
+        // ==================================
+        List<ReturnNote> notes =
+                returnNoteRepo.findByBill_IdOrderByCreatedAtAsc(bill.getId());
+
+        int sequence =
+                java.util.stream.IntStream.range(0, notes.size())
+                        .filter(i -> notes.get(i).getId().equals(note.getId()))
+                        .findFirst()
+                        .orElseThrow()
+                        + 1;
+
+        String returnNumber =
+                bill.getBillCode() + "-R" + sequence;
+
+        // ==================================
+        // 📦 Fetch Return Items
+        // ==================================
+        List<ReturnItem> returnItems =
+                returnItemRepo.findByReturnNote_Id(note.getId());
+
+        List<ReturnPrintResponse.Item> items =
+                returnItems.stream()
+                        .map(ri -> {
+
+                            BigDecimal qty = ri.getTotalReturnedQty();
+                            BigDecimal amount = ri.getTotalAmount();
+
+                            return new ReturnPrintResponse.Item(
+                                    ri.getItem().getName(),
+                                    qty,
+                                    ri.getItem().getBaseUnit().name(),
+                                    ri.getPrice(),
+                                    amount
+                            );
+                        })
+                        .toList();
+
+        // ==================================
+        // 💰 Projected Due
+        // ==================================
+        BigDecimal currentDue =
+                ledgerRepo.getDueForBill(bill.getId());
+
+        if (currentDue == null) {
+            currentDue = BigDecimal.ZERO;
+        }
+
+        BigDecimal projectedDue =
+                currentDue.subtract(note.getNetReturnAmount());
+
+        projectedDue = projectedDue.max(BigDecimal.ZERO);
+
+        // ==================================
+        // 👤 Customer (Safe)
+        // ==================================
+        String customerName = null;
+        String customerMobile = null;
+        String customerAddress = null;
+
+        if (bill.getCustomer() != null) {
+            customerName = bill.getCustomer().getName();
+            customerMobile = bill.getCustomer().getMobile();
+            customerAddress = bill.getCustomer().getAddress();
+        }
+
+        return new ReturnPrintResponse(
+                returnNumber,
+                note.getCreatedAt(),
+                customerName,
+                customerMobile,
+                customerAddress,
+                items,
+                note.getReturnedGrossAmount(),
+                note.getClawedDiscountAmount(),
+                note.getNetReturnAmount(),
+                projectedDue
+        );
     }
 }

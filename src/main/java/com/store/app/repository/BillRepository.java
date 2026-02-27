@@ -1,6 +1,7 @@
 package com.store.app.repository;
 
 import com.store.app.entity.Bill;
+import com.store.app.entity.CustomerLedger;
 import com.store.app.enums.BillState;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
@@ -149,6 +150,15 @@ public interface BillRepository extends JpaRepository<Bill, UUID> {
     """)
     BigDecimal avgBillValue(LocalDate from, LocalDate to);
 
+    //
+    @Query("""
+       SELECT COALESCE(SUM(cl.amount), 0)
+       FROM CustomerLedger cl
+       WHERE cl.bill.id = :billId
+       AND cl.entryType = com.store.app.enums.LedgerType.CREDIT
+       """)
+    BigDecimal getTotalPaidForBill(UUID billId);
+
     /* =====================================================
        READ — LIST / SEARCH BILLS (EXISTING)
        ===================================================== */
@@ -173,4 +183,7 @@ public interface BillRepository extends JpaRepository<Bill, UUID> {
        ===================================================== */
 
     List<Bill> findByCustomerIdOrderByCreatedAtDesc(UUID customerId);
+
+    List<Bill> findByWorkOrder_IdOrderByCreatedAtAsc(UUID workOrderId);
+
 }

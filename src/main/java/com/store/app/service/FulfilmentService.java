@@ -12,6 +12,13 @@ import com.store.app.util.WhatsAppTemplates;
 import jakarta.transaction.Transactional;
 import org.springframework.stereotype.Service;
 import static com.store.app.util.BillGuards.ensureActiveForOps;
+import com.store.app.dto.PendingFulfilmentRow;
+import com.store.app.dto.PendingFulfilmentBillGroupView;
+import com.store.app.dto.PendingFulfilmentItemView;
+
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 import java.math.BigDecimal;
 import java.util.List;
@@ -174,9 +181,39 @@ public class FulfilmentService {
     }
 
     /**
-     * Pending fulfilments are computed dynamically
+     * Optimized grouped pending fulfilments
      */
-    public List<BillItem> getPendingFulfilments() {
-        return billItemRepo.findPendingFulfilments();
+    public List<PendingFulfilmentBillGroupView> getPendingGrouped() {
+
+        List<PendingFulfilmentRow> rows =
+                billItemRepo.findPendingFulfilmentsGrouped();
+
+        Map<UUID, PendingFulfilmentBillGroupView> grouped = new LinkedHashMap<>();
+
+        for (PendingFulfilmentRow r : rows) {
+
+            grouped.computeIfAbsent(r.billId(), id ->
+                    new PendingFulfilmentBillGroupView(
+                            r.billId(),
+                            r.billCode(),
+                            r.customerName(),
+                            new ArrayList<>()
+                    )
+            );
+
+            grouped.get(r.billId()).items().add(
+                    new PendingFulfilmentItemView(
+                            r.billItemId(),
+                            r.itemCode(),
+                            r.itemName(),
+                            r.fulfilledQty(),
+                            r.pendingQty(),
+                            r.status(),
+                            r.lastFulfilledAt()
+                    )
+            );
+        }
+
+        return new ArrayList<>(grouped.values());
     }
 }

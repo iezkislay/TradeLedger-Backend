@@ -24,6 +24,7 @@ public class BillingService {
     private final ItemRepository itemRepo;
     private final StockRepository stockRepo;
     private final BillRepository billRepo;
+    private final WorkOrderRepository workOrderRepo;
 
     @Getter
     private final BillItemRepository billItemRepo;
@@ -61,7 +62,8 @@ public class BillingService {
             ReturnItemRepository returnItemRepo,
             ReturnNoteRepository returnNoteRepo,
             RefundRepository refundRepo,
-            NotificationService notificationService
+            NotificationService notificationService,
+            WorkOrderRepository workOrderRepo
     )
     {
         this.billRepo = billRepo;
@@ -80,6 +82,7 @@ public class BillingService {
         this.returnNoteRepo = returnNoteRepo;
         this.refundRepo = refundRepo;
         this.notificationService = notificationService;
+        this.workOrderRepo = workOrderRepo;
     }
 
 
@@ -99,6 +102,17 @@ public class BillingService {
                     .orElseThrow(() -> new RuntimeException("Customer not found"));
         }
 
+        // ✅ ADDED: WorkOrder handling
+        WorkOrder workOrder = null;
+
+        if (req.getWorkOrderId() != null) {
+            workOrder = workOrderRepo.findById(req.getWorkOrderId())
+                    .orElseThrow(() -> new RuntimeException("Work order not found"));
+
+            if (workOrder.getStatus() != WorkOrderStatus.OPEN) {
+                throw new IllegalStateException("Cannot add bill to closed work order");
+            }
+        }
         if (req.getPaymentType() == PaymentType.CREDIT && customer == null) {
 
             if (req.getCustomerName() == null || req.getCustomerName().isBlank()) {
@@ -164,6 +178,8 @@ public class BillingService {
         bill.setDiscountAmount(discount);
         bill.setTotalAmount(finalAmount);
 
+        // ✅ ADDED: Set work order before saving
+        bill.setWorkOrder(workOrder);
         billRepo.save(bill);
 
         for (BillItemRequest itemReq : req.getItems()) {

@@ -71,6 +71,10 @@ public class Bill {
     @Column(nullable = false)
     private LocalDateTime createdAt = LocalDateTime.now();
 
+    @ManyToOne
+    @JoinColumn(name = "work_order_id")
+    private WorkOrder workOrder;
+
     // ✅ FIX 1: initialize list
     // ✅ FIX 2: prevent infinite JSON loop
     @OneToMany(mappedBy = "bill", fetch = FetchType.EAGER, cascade = CascadeType.ALL)
