@@ -63,4 +63,6 @@ public class CreateBillRequest {
 
     private UUID workOrderId;
 
+    private String customerGstin;
+
 }

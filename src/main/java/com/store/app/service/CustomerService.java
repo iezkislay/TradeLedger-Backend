@@ -68,11 +68,12 @@ public class CustomerService {
     // =====================================================
     // ✅ LIGHTWEIGHT CREATE (AUTO)
     // =====================================================
-    public Customer createCustomer(String name, String mobile, String address) {
+    public Customer createCustomer(String name, String mobile, String address, String gstin) {
         Customer customer = new Customer();
         customer.setName(name);
         customer.setMobile(mobile);
         customer.setAddress(address);
+        customer.setGstin(gstin);
         customer.setCustomerCode(generateCustomerCode());
         return customerRepo.save(customer);
     }

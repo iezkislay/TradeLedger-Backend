@@ -15,6 +15,9 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.UUID;
+import java.util.Map;
+import java.util.HashMap;
+import java.util.ArrayList;
 
 import static com.store.app.util.BillGuards.ensureNotClosed;
 
@@ -25,6 +28,7 @@ public class BillingService {
     private final StockRepository stockRepo;
     private final BillRepository billRepo;
     private final WorkOrderRepository workOrderRepo;
+    private final WhatsAppService whatsAppService;
 
     @Getter
     private final BillItemRepository billItemRepo;
@@ -63,6 +67,7 @@ public class BillingService {
             ReturnNoteRepository returnNoteRepo,
             RefundRepository refundRepo,
             NotificationService notificationService,
+            WhatsAppService whatsAppService,
             WorkOrderRepository workOrderRepo
     )
     {
@@ -82,6 +87,7 @@ public class BillingService {
         this.returnNoteRepo = returnNoteRepo;
         this.refundRepo = refundRepo;
         this.notificationService = notificationService;
+        this.whatsAppService = whatsAppService;
         this.workOrderRepo = workOrderRepo;
     }
 
@@ -125,7 +131,8 @@ public class BillingService {
             customer = customerService.createCustomer(
                     req.getCustomerName().trim(),
                     req.getCustomerMobile().trim(),
-                    req.getCustomerAddress()
+                    req.getCustomerAddress(),
+                    req.getCustomerGstin()
             );
         }
 
@@ -139,7 +146,8 @@ public class BillingService {
             customer = customerService.createCustomer(
                     req.getCustomerName().trim(),
                     req.getCustomerMobile().trim(),
-                    req.getCustomerAddress()
+                    req.getCustomerAddress(),
+                    req.getCustomerGstin()
             );
         }
 
@@ -261,6 +269,15 @@ public class BillingService {
                 finalAmount.toString(),
                 user
         );
+
+        if (bill.getCustomer() != null && bill.getCustomer().getMobile() != null) {
+            whatsAppService.sendBillTemplate(
+                    bill.getCustomer().getMobile(),
+                    bill.getCustomer().getName(),
+                    bill.getBillCode(),
+                    bill.getId()
+            );
+        }
 
         if (customer != null && customer.getMobile() != null) {
             notificationService.sendWhatsApp(
@@ -778,7 +795,8 @@ public class BillingService {
             customer = customerService.createCustomer(
                     req.getCustomerName().trim(),
                     req.getCustomerMobile().trim(),
-                    req.getCustomerAddress()
+                    req.getCustomerAddress(),
+                    req.getCustomerGstin()
             );
         }
 
@@ -1000,5 +1018,268 @@ public class BillingService {
                 user
         );
     }
+    @Transactional
+    public Bill createGstBill(CreateBillRequest req, User user) {
 
+        authService.requireBillingOrOwner(user);
+        validationService.validateBillItems(req.getItems());
+
+        Customer customer = resolveCustomer(req); // ✅ SAME BEHAVIOR
+
+        BigDecimal totalTaxable = BigDecimal.ZERO;
+        BigDecimal totalCgst = BigDecimal.ZERO;
+        BigDecimal totalSgst = BigDecimal.ZERO;
+        BigDecimal subtotal = BigDecimal.ZERO;
+
+        Bill bill = new Bill();
+        bill.setBillNumber(generateBillNumber());
+        bill.setBillCode(generateBillCode());
+        bill.setPaymentType(
+                req.getPaymentType() != null ? req.getPaymentType() : PaymentType.CASH
+        );
+        bill.setCustomer(customer);
+        bill.setCreatedBy(user);
+        bill.setIsGstBill(true);
+
+        for (BillItemRequest itemReq : req.getItems()) {
+
+            Item item = itemRepo.findById(itemReq.getItemId())
+                    .orElseThrow(() -> new RuntimeException("Item not found"));
+
+            BigDecimal gstRate = item.getGstRate() != null
+                    ? item.getGstRate()
+                    : BigDecimal.ZERO;
+
+            BigDecimal priceWithTax = itemReq.getPrice();
+            BigDecimal qty = itemReq.getQuantity();
+
+            var gst = com.store.app.util.GSTCalculator
+                    .calculateInclusive(priceWithTax, gstRate);
+
+            if (gst == null) {
+                throw new RuntimeException("GST calculation failed");
+            }
+
+            BigDecimal taxable = gst.taxable().multiply(qty);
+            BigDecimal cgst = gst.cgst().multiply(qty);
+            BigDecimal sgst = gst.sgst().multiply(qty);
+
+            subtotal = subtotal.add(priceWithTax.multiply(qty));
+            totalTaxable = totalTaxable.add(taxable);
+            totalCgst = totalCgst.add(cgst);
+            totalSgst = totalSgst.add(sgst);
+
+            Stock stock = stockRepo.findByItemId(item.getId())
+                    .orElseThrow(() -> new RuntimeException("Stock not found for item: " + item.getName()));
+
+            BigDecimal fulfilled = stock.getQuantity().min(qty);
+            BigDecimal pending = qty.subtract(fulfilled);
+
+            BillItem bi = new BillItem();
+            bi.setBill(bill);
+            bi.setItem(item);
+            bi.setQuantity(qty);
+            bi.setPrice(priceWithTax);
+            bi.setAmount(priceWithTax.multiply(qty));
+
+            bi.setGstRate(gstRate);
+            bi.setHsnCode(item.getHsnCode());
+            bi.setTaxableAmount(taxable);
+            bi.setCgstAmount(cgst);
+            bi.setSgstAmount(sgst);
+
+            bi.setFulfilledQty(fulfilled);
+            bi.setPendingQty(pending);
+
+            bi.setFulfilmentStatus(
+                    pending.signum() == 0 ? "FULL"
+                            : fulfilled.signum() == 0 ? "PENDING"
+                            : "PARTIAL"
+            );
+
+            bill.getItems().add(bi);
+
+            if (fulfilled.signum() > 0) {
+                stock.setQuantity(stock.getQuantity().subtract(fulfilled));
+                stockRepo.save(stock);
+
+                StockTransaction txn = new StockTransaction();
+                txn.setItem(item);
+                txn.setTransactionType(StockTxnType.OUT);
+                txn.setQuantity(fulfilled);
+                txn.setReferenceType(ReferenceType.BILL);
+                txn.setReferenceId(bill.getId());
+                stockTxnRepo.save(txn);
+            }
+        }
+
+        BigDecimal totalTax = totalCgst.add(totalSgst);
+
+        bill.setSubtotal(subtotal);
+        bill.setTaxableAmount(totalTaxable);
+        bill.setCgstAmount(totalCgst);
+        bill.setSgstAmount(totalSgst);
+        bill.setTotalTax(totalTax);
+        bill.setTotalAmount(subtotal);
+
+        billRepo.save(bill);
+
+        if (bill.getCustomer() != null && bill.getCustomer().getMobile() != null) {
+            whatsAppService.sendBillTemplate(
+                    bill.getCustomer().getMobile(),
+                    bill.getCustomer().getName(),
+                    bill.getBillCode(),
+                    bill.getId()
+            );
+        }
+
+        auditService.log(
+                "BILL",
+                bill.getId(),
+                "CREATE_GST_BILL",
+                null,
+                subtotal.toString(),
+                user
+        );
+
+        return bill;
+    }
+
+    // GST Summary
+
+    public List<GstSummaryRow> getGstSummary(UUID billId) {
+
+        List<BillItem> items = billItemRepo.findByBillId(billId);
+
+        Map<BigDecimal, GstSummaryRow> map = new HashMap<>();
+
+        for (BillItem item : items) {
+
+            BigDecimal rate = item.getGstRate() != null
+                    ? item.getGstRate().setScale(2)
+                    : BigDecimal.ZERO;
+
+            map.compute(rate, (k, v) -> {
+                if (v == null) {
+                    return new GstSummaryRow(
+                            rate,
+                            item.getTaxableAmount(),
+                            item.getCgstAmount(),
+                            item.getSgstAmount()
+                    );
+                } else {
+                    return new GstSummaryRow(
+                            rate,
+                            v.getTaxable().add(item.getTaxableAmount()),
+                            v.getCgst().add(item.getCgstAmount()),
+                            v.getSgst().add(item.getSgstAmount())
+                    );
+                }
+            });
+        }
+
+        return new ArrayList<>(map.values());
+
+    }
+
+    // Print GST Bill
+
+    public GstBillPrintResponse getGstBillForPrint(UUID billId) {
+
+        Bill bill = billRepo.findById(billId)
+                .orElseThrow(() -> new RuntimeException("Bill not found"));
+
+        if (!Boolean.TRUE.equals(bill.getIsGstBill())) {
+            throw new RuntimeException("Not a GST bill");
+        }
+
+        List<BillItem> items = billItemRepo.findByBillId(billId);
+
+        List<GstBillPrintResponse.PrintItem> itemList = items.stream()
+                .map(i -> new GstBillPrintResponse.PrintItem(
+                        i.getItem().getName(),
+                        i.getHsnCode(),
+                        i.getQuantity(),
+                        i.getPrice(),
+                        i.getTaxableAmount(),
+                        i.getCgstAmount(),
+                        i.getSgstAmount(),
+                        i.getAmount(),
+                        i.getItem().getBaseUnit().name()
+                ))
+                .toList();
+
+        List<GstSummaryRow> summary = getGstSummary(billId);
+
+        GstBillPrintResponse res = new GstBillPrintResponse();
+
+        res.setBillNumber(bill.getBillNumber());
+        res.setBillDate(bill.getCreatedAt());
+
+        if (bill.getCustomer() != null) {
+            res.setCustomerName(bill.getCustomer().getName());
+            res.setCustomerMobile(bill.getCustomer().getMobile());
+            res.setCustomerAddress(bill.getCustomer().getAddress());
+            res.setCustomerGstin(bill.getCustomer().getGstin());
+            res.setPlaceOfSupply("Bihar (10)");
+        }
+
+        res.setItems(itemList);
+
+        res.setTaxableAmount(bill.getTaxableAmount());
+        res.setCgstAmount(bill.getCgstAmount());
+        res.setSgstAmount(bill.getSgstAmount());
+        res.setTotalAmount(bill.getTotalAmount());
+
+        res.setGstSummary(summary);
+
+        return res;
+    }
+
+    // RESOLVE CUSTOMER HELPER
+    private Customer resolveCustomer(CreateBillRequest req) {
+
+        Customer customer = null;
+
+        if (req.getCustomerId() != null) {
+            customer = customerRepo.findById(req.getCustomerId())
+                    .orElseThrow(() -> new RuntimeException("Customer not found"));
+        }
+
+        // CREDIT → mandatory customer
+        if (req.getPaymentType() == PaymentType.CREDIT && customer == null) {
+
+            if (req.getCustomerName() == null || req.getCustomerName().isBlank()) {
+                throw new RuntimeException("CREDIT bill requires customer name");
+            }
+            if (req.getCustomerMobile() == null || req.getCustomerMobile().isBlank()) {
+                throw new RuntimeException("CREDIT bill requires customer mobile");
+            }
+
+            customer = customerService.createCustomer(
+                    req.getCustomerName().trim(),
+                    req.getCustomerMobile().trim(),
+                    req.getCustomerAddress(),
+                    req.getCustomerGstin()
+            );
+        }
+
+        // CASH → optional customer
+        if (req.getPaymentType() != PaymentType.CREDIT
+                && customer == null
+                && req.getCustomerName() != null
+                && !req.getCustomerName().isBlank()
+                && req.getCustomerMobile() != null
+                && !req.getCustomerMobile().isBlank()) {
+
+            customer = customerService.createCustomer(
+                    req.getCustomerName().trim(),
+                    req.getCustomerMobile().trim(),
+                    req.getCustomerAddress(),
+                    req.getCustomerGstin()
+            );
+        }
+
+        return customer;
+    }
 }

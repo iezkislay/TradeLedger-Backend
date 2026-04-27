@@ -8,6 +8,7 @@ import org.springframework.data.repository.query.Param;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 public interface StockRepository extends JpaRepository<Stock, UUID> {
@@ -15,6 +16,7 @@ public interface StockRepository extends JpaRepository<Stock, UUID> {
     /* =====================================================
        EXISTING — OPERATIONAL QUERIES (UNCHANGED)
        ===================================================== */
+    Optional<Stock> findByItemId(UUID itemId);
 
     // 🟡 Low stock items (ENTITY — used internally, NOT for controller JSON)
     @Query("""
@@ -52,7 +54,6 @@ public interface StockRepository extends JpaRepository<Stock, UUID> {
     /**
      * Stock summary for dashboard / reports.
      * Uses DTO projection to avoid Hibernate proxy issues.
-     *
      * ⚠️ IMPORTANT:
      * Constructor order MUST match StockSummaryDto exactly.
      */

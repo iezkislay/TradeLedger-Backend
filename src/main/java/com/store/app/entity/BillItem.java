@@ -35,7 +35,7 @@ public class BillItem {
     private BigDecimal quantity;
 
     /**
-     * Price per unit at time of billing
+     * Price per unit at time of billing (GST inclusive)
      */
     @Column(nullable = false)
     private BigDecimal price;
@@ -46,9 +46,27 @@ public class BillItem {
     @Column(nullable = false)
     private BigDecimal amount;
 
+    // ================= GST FIELDS =================
+
+    @Column(name = "hsn_code")
+    private String hsnCode;
+
+    @Column(name = "gst_rate")
+    private BigDecimal gstRate;
+
+    @Column(name = "taxable_amount")
+    private BigDecimal taxableAmount = BigDecimal.ZERO;
+
+    @Column(name = "cgst_amount")
+    private BigDecimal cgstAmount = BigDecimal.ZERO;
+
+    @Column(name = "sgst_amount")
+    private BigDecimal sgstAmount = BigDecimal.ZERO;
+
+    // ================= FULFILMENT =================
+
     /**
-     * 🆕 Quantity returned by customer
-     * (from DELIVERED or PENDING)
+     * Quantity returned by customer
      */
     @Column(name = "returned_quantity", nullable = false)
     private BigDecimal returnedQty = BigDecimal.ZERO;

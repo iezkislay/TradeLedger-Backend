@@ -247,4 +247,35 @@ public class BillingController {
                 new ApiResponse<>(true, "OK", "Estimate cancelled")
         );
     }
+
+    // =====================================================
+    // GST BILLING
+    // =====================================================
+    @PostMapping("/gst/bills")
+    public ResponseEntity<ApiResponse<Bill>> createGstBill(
+            @RequestBody CreateBillRequest req,
+            HttpSession session
+    ) {
+        System.out.println("🔥 GST API HIT");
+
+        User user = authService.getCurrentUser(session);
+        Bill bill = billingService.createGstBill(req, user);
+
+        return ResponseEntity.ok(new ApiResponse<>(true, bill, "Success"));
+    }
+
+
+    // =====================================================
+    // PRINT GST BILL
+    // =====================================================
+    @GetMapping("/gst/bills/{billId}/print")
+    public ResponseEntity<ApiResponse<GstBillPrintResponse>> printGstBill(
+            @PathVariable UUID billId
+    ) {
+
+        GstBillPrintResponse res = billingService.getGstBillForPrint(billId);
+
+        return ResponseEntity.ok(new ApiResponse<>(true, res, "Success"));
+        // return ResponseEntity.ok(ApiResponse.success(res));
+    }
 }

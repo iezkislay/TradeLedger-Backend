@@ -12,6 +12,8 @@ import java.util.UUID;
 @Table(name = "items")
 @Getter
 @Setter
+@NoArgsConstructor
+@AllArgsConstructor
 public class Item {
 
     @Id
@@ -32,6 +34,15 @@ public class Item {
     private BigDecimal costPrice;
     private BigDecimal minStock;
 
+    // ================= GST FIELDS =================
+
+    @Column(name = "gst_rate")
+    private BigDecimal gstRate;
+
+    @Column(name = "hsn_code")
+    private String hsnCode;
+
+    // ================= META =================
+
     private LocalDateTime createdAt = LocalDateTime.now();
 }
-

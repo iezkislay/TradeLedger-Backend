@@ -39,6 +39,9 @@ public class Customer {
     @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt;
 
+    @Column(name = "gstin", length = 15)
+    private String gstin;
+
     @PrePersist
     public void prePersist() {
         if (createdAt == null) {

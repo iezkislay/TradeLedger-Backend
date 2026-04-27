@@ -38,18 +38,36 @@ public class Bill {
     private Customer customer;
 
     /**
-     * ✅ NEW: Sum of all bill item line amounts (before discount)
+     * Sum of all bill item line amounts (inclusive of GST)
      */
     @Column(nullable = false)
     private BigDecimal subtotal = BigDecimal.ZERO;
 
     /**
-     * ✅ NEW: Flat discount applied on bill (₹)
+     * Flat discount applied on bill (₹)
      */
     @Column(nullable = false)
     private BigDecimal discountAmount = BigDecimal.ZERO;
 
-    // Bill State
+    // ================= GST FIELDS =================
+
+    @Column(name = "is_gst_bill")
+    private Boolean isGstBill = false;
+
+    @Column(name = "taxable_amount")
+    private BigDecimal taxableAmount = BigDecimal.ZERO;
+
+    @Column(name = "cgst_amount")
+    private BigDecimal cgstAmount = BigDecimal.ZERO;
+
+    @Column(name = "sgst_amount")
+    private BigDecimal sgstAmount = BigDecimal.ZERO;
+
+    @Column(name = "total_tax")
+    private BigDecimal totalTax = BigDecimal.ZERO;
+
+    // ================= BILL STATE =================
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     private BillState state = BillState.ACTIVE;
@@ -75,13 +93,13 @@ public class Bill {
     @JoinColumn(name = "work_order_id")
     private WorkOrder workOrder;
 
-    // ✅ FIX 1: initialize list
-    // ✅ FIX 2: prevent infinite JSON loop
+    // Bill Items
     @OneToMany(mappedBy = "bill", fetch = FetchType.EAGER, cascade = CascadeType.ALL)
     @JsonManagedReference
     private List<BillItem> items = new ArrayList<>();
 
-    // Helper Methods
+    // ================= HELPER METHODS =================
+
     public boolean isEstimate() {
         return state == BillState.ESTIMATE;
     }
@@ -97,5 +115,4 @@ public class Bill {
     public boolean isCancelled() {
         return state == BillState.CANCELLED;
     }
-
 }
