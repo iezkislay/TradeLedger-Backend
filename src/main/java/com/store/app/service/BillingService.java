@@ -8,7 +8,10 @@ import com.store.app.repository.*;
 import com.store.app.util.WhatsAppTemplates;
 import lombok.Getter;
 import org.springframework.stereotype.Service;
+import com.openhtmltopdf.pdfboxout.PdfRendererBuilder;
 
+import java.io.ByteArrayOutputStream;
+import java.io.File;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -1281,5 +1284,97 @@ public class BillingService {
         }
 
         return customer;
+    }
+
+    public byte[] generateBillPdf(UUID billId) throws Exception {
+
+        BillPrintResponse bill = getBillForPrint(billId); // 👈 IMPORTANT
+
+        String html = buildHtmlFromPrint(bill);
+
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+
+        PdfRendererBuilder builder = new PdfRendererBuilder();
+        builder.withHtmlContent(html, null);
+
+        builder.toStream(out);
+        builder.run();
+
+        return out.toByteArray();
+    }
+
+    private String safe(String val) {
+        return val == null ? "-" : val;
+    }
+
+    private String buildHtmlFromPrint(BillPrintResponse bill) {
+
+        StringBuilder itemsHtml = new StringBuilder();
+        int i = 1;
+
+        for (BillPrintResponse.Item item : bill.getItems()) {
+            itemsHtml.append("<tr>")
+                    .append("<td>").append(i++).append("</td>")
+                    .append("<td>").append(item.getName()).append("</td>")
+                    .append("<td>").append(item.getQuantity()).append(" ").append(item.getUnit()).append("</td>")
+                    .append("<td>Rs. ").append(item.getPrice()).append("</td>")
+                    .append("<td>Rs. ").append(item.getAmount()).append("</td>")
+                    .append("</tr>");
+        }
+
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("dd MMM yyyy, hh:mm a");
+
+        String formattedDate = bill.getBillDate().format(formatter);
+
+        return "<html>" +
+                "<head>" +
+                "<style>" +
+                "body { font-family: Helvetica; font-size: 12px; padding: 20px; }" +
+                "h2 { margin-bottom: 0; }" +
+                ".header { text-align: center; }" +
+                "table { width: 100%; border-collapse: collapse; margin-top: 10px; }" +
+                "th { border-bottom: 2px solid #000; padding: 6px; text-align: left; }" +
+                "td { border-bottom: 1px solid #ddd; padding: 6px; }" +
+                ".right { text-align: right; }" +
+                ".totals { margin-top: 10px; float: right; width: 250px; }" +
+                "</style>" +
+                "</head>" +
+
+                "<body>" +
+
+                "<div class='header'>" +
+                "<h2>Pooja Hardware</h2>" +
+                "<p>C K Road, Arrah<br/>Mobile: 9304646404</p>" +
+                "</div>" +
+
+                "<p><b>Bill No:</b> " + bill.getBillNumber() + "<br/>" +
+                "<b>Date:</b> " + formattedDate + "</p>" +
+
+                "<p><b>Customer:</b> " + safe(bill.getCustomerName()) + "<br/>" +
+                "<b>Mobile:</b> " + safe(bill.getCustomerMobile()) + "<br/>" +
+                "<b>Address:</b> " + safe(bill.getCustomerAddress()) + "</p>" +
+
+                "<table>" +
+                "<tr>" +
+                "<th>S.No</th>" +
+                "<th>Description</th>" +
+                "<th>Qty</th>" +
+                "<th>Rate</th>" +
+                "<th>Amount</th>" +
+                "</tr>" +
+
+                itemsHtml +
+
+                "</table>" +
+
+                "<div class='totals'>" +
+                "<p>Subtotal: Rs. " + bill.getSubtotal() + "</p>" +
+                "<p>Discount: Rs. " + bill.getDiscount() + "</p>" +
+                "<p><b>Total: Rs. " + bill.getTotal() + "</b></p>" +
+                "<p>Paid: Rs. " + bill.getPaid() + "</p>" +
+                "<p>Due: Rs. " + bill.getDue() + "</p>" +
+                "</div>" +
+
+                "</body></html>";
     }
 }

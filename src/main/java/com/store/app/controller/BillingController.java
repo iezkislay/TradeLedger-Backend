@@ -7,6 +7,8 @@ import com.store.app.dto.ActivateBillRequest;
 import com.store.app.service.AuthService;
 import com.store.app.service.BillingService;
 import jakarta.servlet.http.HttpSession;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -277,5 +279,48 @@ public class BillingController {
 
         return ResponseEntity.ok(new ApiResponse<>(true, res, "Success"));
         // return ResponseEntity.ok(ApiResponse.success(res));
+    }
+
+
+    // ====================================================
+    // PUBLIC BILL FETCH
+    // ====================================================
+
+    @RestController
+    @RequestMapping("/api/public/bills")
+    public class BillingPublicController {
+
+        @GetMapping("/{id}")
+        public ResponseEntity<ApiResponse<BillResponse>> getPublicBill(
+                @PathVariable UUID id
+        ) {
+            return ResponseEntity.ok(
+                    new ApiResponse<>(
+                            true,
+                            billingService.getBillById(id),
+                            "Bill fetched"
+                    )
+            );
+        }
+
+        @GetMapping("/{id}/print")
+        public ResponseEntity<BillPrintResponse> publicPrintBill(
+                @PathVariable UUID id
+        ) {
+            return ResponseEntity.ok(
+                    billingService.getBillForPrint(id)
+            );
+        }
+
+        @GetMapping("/{id}/pdf")
+        public ResponseEntity<byte[]> getPdf(@PathVariable UUID id) throws Exception {
+
+            byte[] pdf = billingService.generateBillPdf(id);
+
+            return ResponseEntity.ok()
+                    .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=bill.pdf")
+                    .contentType(MediaType.APPLICATION_PDF)
+                    .body(pdf);
+        }
     }
 }

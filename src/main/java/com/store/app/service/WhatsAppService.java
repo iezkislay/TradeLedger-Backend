@@ -33,7 +33,7 @@ public class WhatsAppService {
 
             String url = apiUrl + "/" + phoneNumberId + "/messages";
 
-            String link = "https://app.arrah-bihar.com/bill/" + billId;
+            String link = "https://api.arrah-bihar.com/public/bills/" + billId + "/pdf";
 
             String body = """
         {

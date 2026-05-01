@@ -1,0 +1,48 @@
+<html>
+<head>
+    <style>
+        body { font-family: Arial; font-size: 12px; }
+        .header { text-align: center; }
+        .table { width: 100%; border-collapse: collapse; }
+        .table td, .table th { border-bottom: 1px solid #ddd; padding: 6px; }
+        .right { text-align: right; }
+    </style>
+</head>
+
+<body>
+
+<div class="header">
+    <h2>Pooja Hardware</h2>
+    <p>C. K Road, Arrah, Bihar<br/>Mobile: 9304646404</p>
+</div>
+
+<p>
+    Bill No: {{billNumber}}<br/>
+    Date: {{date}}
+</p>
+
+<p>
+    Customer: {{customerName}}<br/>
+    Mobile: {{customerMobile}}<br/>
+    Address: {{address}}
+</p>
+
+<table class="table">
+    <tr>
+        <th>S.No</th>
+        <th>Description</th>
+        <th>Qty</th>
+        <th>Rate</th>
+        <th>Amount</th>
+    </tr>
+
+    {{items}}
+
+</table>
+
+<p class="right">Subtotal: ₹ {{subtotal}}</p>
+<p class="right">Discount: ₹ {{discount}}</p>
+<p class="right"><b>Total: ₹ {{total}}</b></p>
+
+</body>
+</html>
