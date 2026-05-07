@@ -273,20 +273,18 @@ public class BillingService {
                 user
         );
 
-        if (bill.getCustomer() != null && bill.getCustomer().getMobile() != null) {
-            whatsAppService.sendBillTemplate(
-                    bill.getCustomer().getMobile(),
-                    bill.getCustomer().getName(),
-                    bill.getBillCode(),
-                    bill.getId()
-            );
-        }
-
-        if (customer != null && customer.getMobile() != null) {
-            notificationService.sendWhatsApp(
-                    customer.getMobile(),
-                    WhatsAppTemplates.billCreated(bill)
-            );
+        // ============================================
+        // 🔥 WHATSAPP CONTROL (FINAL FIX)
+        // ============================================
+        if (Boolean.TRUE.equals(req.getSendWhatsapp())) {
+            if (bill.getCustomer() != null && bill.getCustomer().getMobile() != null) {
+                whatsAppService.sendBillTemplate(
+                        bill.getCustomer().getMobile(),
+                        bill.getCustomer().getName(),
+                        bill.getBillCode(),
+                        bill.getId()
+                );
+            }
         }
 
         return bill;

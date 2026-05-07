@@ -65,4 +65,6 @@ public class CreateBillRequest {
 
     private String customerGstin;
 
+    private Boolean sendWhatsapp;
+
 }
