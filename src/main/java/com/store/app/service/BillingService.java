@@ -500,6 +500,7 @@ public class BillingService {
                 bill.getItems().stream()
                         .map(i -> new BillPrintResponse.Item(
                                 i.getItem().getName(),
+                                i.getItem().getBrand(),
                                 i.getQuantity(),
                                 i.getItem().getBaseUnit().name(),
                                 i.getPrice(),
@@ -1313,7 +1314,16 @@ public class BillingService {
         for (BillPrintResponse.Item item : bill.getItems()) {
             itemsHtml.append("<tr>")
                     .append("<td>").append(i++).append("</td>")
-                    .append("<td>").append(item.getName()).append("</td>")
+                    .append("<td>")
+                    .append(item.getName())
+
+                    .append(
+                            item.getBrand() != null && !item.getBrand().isBlank()
+                                    ? "<br/><span style='font-size:10px;color:#666;'>(" + item.getBrand() + ")</span>"
+                                    : ""
+                    )
+
+                    .append("</td>")
                     .append("<td>").append(item.getQuantity()).append(" ").append(item.getUnit()).append("</td>")
                     .append("<td>Rs. ").append(item.getPrice()).append("</td>")
                     .append("<td>Rs. ").append(item.getAmount()).append("</td>")

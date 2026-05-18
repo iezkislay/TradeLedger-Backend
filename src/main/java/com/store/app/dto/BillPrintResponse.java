@@ -63,7 +63,10 @@ public class BillPrintResponse {
 
     @Getter
     public static class Item {
+
         private final String name;
+        private final String brand;
+
         private final BigDecimal quantity;
         private final String unit;
         private final BigDecimal price;
@@ -71,12 +74,14 @@ public class BillPrintResponse {
 
         public Item(
                 String name,
+                String brand,
                 BigDecimal quantity,
                 String unit,
                 BigDecimal price,
                 BigDecimal amount
         ) {
             this.name = name;
+            this.brand = brand;
             this.quantity = quantity;
             this.unit = unit;
             this.price = price;
