@@ -1385,4 +1385,177 @@ public class BillingService {
 
                 "</body></html>";
     }
+
+    // =====================================================
+    // =====================================================
+    // BILL AT ONE PLACE CONCEPT
+    // =====================================================
+    // =====================================================
+
+    public CustomerBillPrintResponse getCustomerBillPrint(UUID billId) {
+
+        // =====================================================
+        // FETCH BILL
+        // =====================================================
+
+        Bill bill = billRepo.findById(billId)
+                .orElseThrow(() -> new RuntimeException("Bill not found"));
+
+        // =====================================================
+        // BILL ITEMS (RECONCILED)
+        // =====================================================
+
+        List<BillItem> items =
+                billItemRepo.findByBillIdOrderByIdAsc(billId);
+
+        List<CustomerBillPrintResponse.Item> itemResponses =
+                items.stream()
+                        .map(bi -> {
+
+                            BigDecimal returnedQty =
+                                    returnItemRepo.getTotalReturnedQtyForBillItem(
+                                            bi.getId()
+                                    );
+
+                            if (returnedQty == null) {
+                                returnedQty = BigDecimal.ZERO;
+                            }
+
+                            BigDecimal netQty =
+                                    bi.getQuantity().subtract(returnedQty);
+
+                            String status;
+
+                            if (returnedQty.compareTo(bi.getQuantity()) == 0) {
+                                status = "RETURNED";
+                            } else if (returnedQty.signum() > 0) {
+                                status = "PARTIAL_RETURN";
+                            } else {
+                                status = "ACTIVE";
+                            }
+
+                            return new CustomerBillPrintResponse.Item(
+                                    bi.getItem().getItemCode(),
+                                    bi.getItem().getName(),
+                                    bi.getItem().getBrand(),
+                                    bi.getItem().getBaseUnit() != null
+                                            ? bi.getItem().getBaseUnit().name()
+                                            : null,
+
+                                    bi.getQuantity(),
+                                    returnedQty,
+                                    netQty,
+
+                                    bi.getPrice(),
+                                    bi.getAmount(),
+
+                                    status
+                            );
+                        })
+                        .toList();
+
+        // =====================================================
+        // RETURNS
+        // =====================================================
+
+        BigDecimal returnedAmount =
+                returnNoteRepo.sumFinalizedReturnByBill(billId);
+
+        if (returnedAmount == null) {
+            returnedAmount = BigDecimal.ZERO;
+        }
+
+        // =====================================================
+        // REFUNDS
+        // =====================================================
+
+        BigDecimal refundedAmount =
+                refundRepo.sumRefundedAmountByBill(billId);
+
+        if (refundedAmount == null) {
+            refundedAmount = BigDecimal.ZERO;
+        }
+
+        // =====================================================
+        // LEDGER SUMMARY
+        // =====================================================
+
+        BigDecimal paidAmount =
+                ledgerRepo.sumByBillAndType(
+                        billId,
+                        LedgerType.CREDIT
+                );
+
+        if (paidAmount == null) {
+            paidAmount = BigDecimal.ZERO;
+        }
+
+        BigDecimal adjustment =
+                ledgerRepo.sumByBillAndType(
+                        billId,
+                        LedgerType.ADJUSTMENT
+                );
+
+        if (adjustment == null) {
+            adjustment = BigDecimal.ZERO;
+        }
+
+        BigDecimal due =
+                ledgerRepo.getDueForBill(billId);
+
+        if (due == null) {
+            due = BigDecimal.ZERO;
+        }
+
+        // =====================================================
+        // CUSTOMER
+        // =====================================================
+
+        String customerName = null;
+        String customerMobile = null;
+        String customerAddress = null;
+
+        if (bill.getCustomer() != null) {
+
+            customerName = bill.getCustomer().getName();
+            customerMobile = bill.getCustomer().getMobile();
+            customerAddress = bill.getCustomer().getAddress();
+        }
+
+        // =====================================================
+        // RESPONSE
+        // =====================================================
+
+        return new CustomerBillPrintResponse(
+                bill.getId(),
+
+                bill.getBillNumber(),
+                bill.getBillCode(),
+
+                bill.getCreatedAt(),
+
+                bill.getPaymentType().name(),
+                bill.getState().name(),
+
+                customerName,
+                customerMobile,
+                customerAddress,
+
+                itemResponses,
+
+                returnedAmount,
+                refundedAmount,
+
+                bill.getSubtotal(),
+                bill.getDiscountAmount(),
+
+                bill.getTotalAmount().subtract(returnedAmount),
+
+                paidAmount,
+
+                adjustment,
+
+                due
+        );
+    }
 }

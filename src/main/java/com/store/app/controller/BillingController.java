@@ -109,6 +109,24 @@ public class BillingController {
     }
 
     // =====================================================
+    // GET COMPLETE BILL
+    // =====================================================
+
+    @GetMapping("/{id}/customer-print")
+    public ResponseEntity<CustomerBillPrintResponse> customerPrint(
+            @PathVariable UUID id,
+            HttpSession session
+    ) {
+
+        User user = authService.getCurrentUser(session);
+        authService.requireBillingOrOwner(user);
+
+        return ResponseEntity.ok(
+                billingService.getCustomerBillPrint(id)
+        );
+    }
+
+    // =====================================================
     // 💰 SETTLE BILL (PARTIAL / FINAL / WAIVER)
     // =====================================================
     @PostMapping("/{billId}/settle")
