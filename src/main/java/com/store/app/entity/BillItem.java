@@ -19,6 +19,9 @@ public class BillItem {
     @GeneratedValue
     private UUID id;
 
+    @Column(name = "line_number", nullable = false)
+    private Integer lineNumber;
+
     @ManyToOne(optional = false)
     @JoinColumn(name = "bill_id")
     @JsonBackReference

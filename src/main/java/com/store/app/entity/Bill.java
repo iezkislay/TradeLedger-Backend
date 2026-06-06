@@ -95,6 +95,7 @@ public class Bill {
 
     // Bill Items
     @OneToMany(mappedBy = "bill", fetch = FetchType.EAGER, cascade = CascadeType.ALL)
+    @OrderBy("lineNumber ASC")
     @JsonManagedReference
     private List<BillItem> items = new ArrayList<>();
 

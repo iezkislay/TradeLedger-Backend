@@ -99,7 +99,7 @@ public class BillItemController {
         }
 
         List<BillItem> items =
-                billItemRepo.findByBillIdOrderByIdAsc(billId);
+                billItemRepo.findByBillIdOrderByLineNumberAsc(billId);
 
         List<BillItemResponse> response = items.stream()
                 .map(bi -> {

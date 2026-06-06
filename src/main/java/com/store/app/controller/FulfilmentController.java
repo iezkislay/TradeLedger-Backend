@@ -98,7 +98,7 @@ public class FulfilmentController {
         }
 
         List<BillItem> items =
-                billItemRepo.findByBillIdOrderByIdAsc(billId);
+                billItemRepo.findByBillIdOrderByLineNumberAsc(billId);
 
         List<FulfilmentView> result = items.stream()
                 .map(bi -> {

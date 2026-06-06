@@ -193,6 +193,8 @@ public class BillingService {
         bill.setWorkOrder(workOrder);
         billRepo.save(bill);
 
+        int lineNo = 1;
+
         for (BillItemRequest itemReq : req.getItems()) {
 
             Item item = itemRepo.findById(itemReq.getItemId())
@@ -208,6 +210,7 @@ public class BillingService {
             BigDecimal pending = itemReq.getQuantity().subtract(fulfilled);
 
             BillItem bi = new BillItem();
+            bi.setLineNumber(lineNo++);
             bi.setBill(bill);
             bi.setItem(item);
             bi.setQuantity(itemReq.getQuantity());
@@ -826,6 +829,8 @@ public class BillingService {
        4️⃣ ATTACH ITEMS (NO STOCK MOVEMENT)
        ===================================================== */
 
+        int lineNo = 1;
+
         for (BillItemRequest itemReq : req.getItems()) {
 
             Item item = itemRepo.findById(itemReq.getItemId())
@@ -835,6 +840,7 @@ public class BillingService {
             validationService.validatePrice(itemReq.getPrice(), item.getCostPrice());
 
             BillItem bi = new BillItem();
+            bi.setLineNumber(lineNo++);
             bi.setBill(bill);
             bi.setItem(item);
             bi.setQuantity(itemReq.getQuantity());
@@ -1043,6 +1049,8 @@ public class BillingService {
         bill.setCreatedBy(user);
         bill.setIsGstBill(true);
 
+        int lineNo = 1;
+
         for (BillItemRequest itemReq : req.getItems()) {
 
             Item item = itemRepo.findById(itemReq.getItemId())
@@ -1078,6 +1086,7 @@ public class BillingService {
             BigDecimal pending = qty.subtract(fulfilled);
 
             BillItem bi = new BillItem();
+            bi.setLineNumber(lineNo++);
             bi.setBill(bill);
             bi.setItem(item);
             bi.setQuantity(qty);
@@ -1406,7 +1415,7 @@ public class BillingService {
         // =====================================================
 
         List<BillItem> items =
-                billItemRepo.findByBillIdOrderByIdAsc(billId);
+                billItemRepo.findByBillIdOrderByLineNumberAsc(billId);
 
         List<CustomerBillPrintResponse.Item> itemResponses =
                 items.stream()

@@ -14,7 +14,7 @@ public interface BillItemRepository extends JpaRepository<BillItem, UUID> {
     List<BillItem> findByBillId(UUID billId);
 
     // Creation order = insertion order (via ID)
-    List<BillItem> findByBillIdOrderByIdAsc(UUID billId);
+    List<BillItem> findByBillIdOrderByLineNumberAsc(UUID billId);
 
     /**
      * Pending fulfilments =
